@@ -167,7 +167,7 @@
   (let [player (first (:play-order board))
         remaining-players (remove #{player} (:remaining-players board))
         play-order (filter #(not (= player %)) (:play-order board))
-        players (remove #{player} (:players board))]
+        players (remove #(= player (:id %)) (:players board))]
     (assoc board :remaining-players remaining-players :play-order play-order
            :players players)))
 
@@ -175,12 +175,12 @@
   [board r]
   (let [player (first (:play-order board))
         new-bet (->Bet (+ r (board->total-bet board))
-                       #{(:id player)})
+                       #{player})
         bets (update-bets (:bets board) new-bet)]
     (assoc board
       :bets (merge-bets bets)
       :play-order (rest (:play-order board))
-      :remaining-players (remove #{player} (:players board)))))
+      :remaining-players (remove #{player} (map :id (:players board))))))
 
 (defn call
   [board]
@@ -188,7 +188,7 @@
         bet-amt (board->total-bet board)]
     (if (pos? bet-amt)
       (let [new-bet (->Bet bet-amt
-                           #{(:id player)})
+                           #{player})
             bets (update-bets (:bets board) new-bet)]
         (assoc board
           :bets (merge-bets bets)
@@ -214,10 +214,10 @@
 (defn stage-transition
   [board]
   (assoc board
-    :remaining-players (:players board)
+    :remaining-players (map :id (:players board))
     :bets (list)
     :pots (concat (:pots board) (:bets board))
-    :play-order (cycle (:players board))))
+    :play-order (cycle (map :id (:players board)))))
 
 (defn play-stage
   [board action-ch]
@@ -243,7 +243,7 @@
   (let [community-cards (list)
         pots (list)
         bets (list)
-        remaining-players players
+        remaining-players (map :id players)
         play-order (cycle remaining-players)]
     (->Board community-cards bets pots
              remaining-players play-order players blinds)))
@@ -288,7 +288,7 @@
       (raise (get-in board [:blinds :small]))
       (raise (- (get-in board [:blinds :big])
                 (get-in board [:blinds :small])))
-      (assoc :remaining-players (:players board))))
+      (assoc :remaining-players (map :id (:players board)))))
 
 (defn preflop-stage
   [board action-ch]

@@ -75,9 +75,9 @@
                (get board :players)))
         (is (= [b1 b2]
                (get board :bets)))
-        (is (= p1
+        (is (= 1
                (first (get board :play-order))))
-        (is (= [p1 p2]
+        (is (= [1 2]
                (get board :remaining-players)))))
     (testing "three players"
       (let [board (-> (init-board [p1 p2 p3] {:small 5 :big 10})
@@ -86,9 +86,9 @@
                (get board :players)))
         (is (= [b1 b2]
                (get board :bets)))
-        (is (= p3
+        (is (= 3
                (first (get board :play-order))))
-        (is (= [p1 p2 p3]
+        (is (= [1 2 3]
                (get board :remaining-players)))))))
 
 (deftest test-fold
@@ -106,9 +106,9 @@
              (get board :players)))
       (is (= [b1 b2]
              (get board :bets)))
-      (is (= p1
+      (is (= 1
              (first (get board :play-order))))
-      (is (= [p1 p2]
+      (is (= [1 2]
              (get board :remaining-players))))))
 
 (deftest test-raise
@@ -127,9 +127,9 @@
              (get board :players)))
       (is (= [b1 b2 b3]
              (get board :bets)))
-      (is (= p1
+      (is (= 1
              (first (get board :play-order))))
-      (is (= [p1 p2]
+      (is (= [1 2]
              (get board :remaining-players))))))
 
 (deftest test-call
@@ -147,9 +147,9 @@
              (get board :players)))
       (is (= [b1 b2]
              (get board :bets)))
-      (is (= p1
+      (is (= 1
              (first (get board :play-order))))
-      (is (= [p1 p2]
+      (is (= [1 2]
              (get board :remaining-players))))))
 
 (deftest test-preflop-stage
@@ -179,20 +179,20 @@
           end-stage-board (future (preflop-stage board0 a))]
       (is (not (nil? a)))
       (is (= [p1 p2 p3] (:players board0)))
-      (is (= [p1 p2 p3] (:remaining-players board0)))
+      (is (= [1 2 3] (:remaining-players board0)))
       (is (= (:bets board0)))
-      (is (= p1 (first (:play-order board0))))
+      (is (= 1 (first (:play-order board0))))
       (>!! a 0) ;; player 3 calls
       (>!! a big-blind) ;; player 1 raises by big blind
       (>!! a -1) ;; player 2 folds
       (>!! a big-blind) ;; player 3 raises
       (>!! a 0) ;; player 1 calls
       (let [realized @end-stage-board]
-        (is (= [1 3] (map :id (:players realized))))
-        (is (= [1 3] (map :id (:remaining-players realized))))
+        (is (= [p1 p3] (:players realized)))
+        (is (= [1 3] (:remaining-players realized)))
         (is (= [] (:bets realized)))
         (is (= [b12 b34] (:pots realized)))
-        (is (= p1 (first (:play-order realized)))))
+        (is (= 1 (first (:play-order realized)))))
       (close! a))))
 
 (deftest test-game
@@ -226,8 +226,8 @@
       (>!! a 3) ;; player 1 raises
       (>!! a 0) ;; player 3 calls
       (let [realized @end-board]
-        (is (= [1 3] (map :id (:remaining-players realized))))
-        (is (= [1 3] (map :id (:players realized))))
+        (is (= [1 3] (:remaining-players realized)))
+        (is (= [p1 p3] (:players realized)))
         (is (= [] (:bets realized)))
         (is (= [b12 b3 b4 b5] (:pots realized))))))
   (testing "no one left for turn"
@@ -249,8 +249,8 @@
       (>!! a -1) ;; player 2 folds
       (>!! a -1) ;; player 3 folds
       (let [realized @end-board]
-        (is (= [1] (map :id (:remaining-players realized))))
-        (is (= [1] (map :id (:players realized))))
+        (is (= [1] (:remaining-players realized)))
+        (is (= [p1] (:players realized)))
         (is (= [] (:bets realized)))
         (is (= [b12 b3] (:pots realized))))))
   (testing "no one left after flop"
@@ -274,11 +274,11 @@
       (>!! a 10) ;; player 1 raises
       (>!! a -1) ;; player 3 folds
       (let [realized @end-board]
-        (is (= [1] (map :id (:remaining-players realized))))
-        (is (= [1] (map :id (:players realized))))
+        (is (= [1] (:remaining-players realized)))
+        (is (= [p1] (:players realized)))
         (is (= [] (:bets realized)))
         (is (= [b12 b3] (:pots realized))))))
-    (testing "all the way to showdown"
+  (testing "all the way to showdown"
     (let [ps (player-gen)
           [p1 p2 p3 :as players] (take 3 ps)
           _ (doseq [p players] (run p))
@@ -304,7 +304,7 @@
       (>!! a 17);; player 3 raises
       (>!! a -1) ;; player 1 folds
       (let [realized @end-board]
-        (is (= [3] (map :id (:remaining-players realized))))
-        (is (= [3] (map :id (:players realized))))
+        (is (= [3] (:remaining-players realized)))
+        (is (= [p3] (:players realized)))
         (is (= [] (:bets realized)))
         (is (= [b12 b3 b4] (:pots realized)))))))
