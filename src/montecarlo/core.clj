@@ -207,6 +207,10 @@
   [board]
   (empty? (:remaining-players board)))
 
+(defn game-end?
+  [board]
+  (empty? (rest (:players board))))
+
 (defn stage-transition
   [board]
   (assoc board
@@ -218,21 +222,21 @@
 (defn play-stage
   [board action-ch]
   (loop [board board]
-     (let [player (first (:play-order board))]
-       (if (stage-end? board)
-         (stage-transition board)
-         (let [action (<!! action-ch)]
-           (cond
-            (is-fold? action) (let [res (fold board)]
+    (let [player (first (:play-order board))]
+      (if (stage-end? board)
+        (stage-transition board)
+        (let [action (<!! action-ch)]
+          (cond
+           (is-fold? action) (let [res (fold board)]
+                               (update-players res)
+                               (recur res))
+           (is-call? action) (let [res (call board)]
+                               (update-players res)
+                               (recur res))
+           (is-raise? action) (let [res (raise board (action->raise action))]
                                 (update-players res)
                                 (recur res))
-            (is-call? action) (let [res (call board)]
-                                (update-players res)
-                                (recur res))
-            (is-raise? action) (let [res (raise board (action->raise action))]
-                                (update-players res)
-                                (recur res))
-            :else (throw "Action is not fold nor call nor raise!")))))))
+           :else (throw "Action is not fold nor call nor raise!")))))))
 
 (defn init-board
   [players blinds]
@@ -301,15 +305,20 @@
                         first
                         :action-ch)
           board (-> (init-board players blinds)
-                    (preflop-stage action-ch))
-          ;; flop stage
-          {:keys [board deck]} (flop board (burn deck))
-          board (play-stage board action-ch)
-          ;; turn stage
-          {:keys [board deck]} (turn board (burn deck))
-          board (play-stage board action-ch)
-          ;; river stage
-          {:keys [board deck]} (river board (burn deck))
-          board (play-stage board action-ch)
-          ]
-      board)))
+                    (preflop-stage action-ch))]
+      (if (game-end? board)
+        board
+        ;; flop stage
+        (let [{:keys [board deck]} (flop board (burn deck))
+              board (play-stage board action-ch)]
+          (if (game-end? board)
+            board
+            ;; turn stage
+            (let [{:keys [board deck]} (turn board (burn deck))
+                  board (play-stage board action-ch)]
+              (if (game-end? board)
+                board
+                ;; river stage
+                (let [{:keys [board deck]} (river board (burn deck))
+                      board (play-stage board action-ch)]
+                  board)))))))))

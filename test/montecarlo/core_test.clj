@@ -196,7 +196,7 @@
       (close! a))))
 
 (deftest test-game
-  (testing "game"
+  (testing "all the way to showdown"
     (let [ps (player-gen)
           [p1 p2 p3 :as players] (take 3 ps)
           _ (doseq [p players] (run p))
@@ -229,4 +229,82 @@
         (is (= [1 3] (map :id (:remaining-players realized))))
         (is (= [1 3] (map :id (:players realized))))
         (is (= [] (:bets realized)))
-        (is (= [b12 b3 b4 b5] (:pots realized)))))))
+        (is (= [b12 b3 b4 b5] (:pots realized))))))
+  (testing "no one left for turn"
+    (let [ps (player-gen)
+          [p1 p2 p3 :as players] (take 3 ps)
+          _ (doseq [p players] (run p))
+          blinds {:small 5 :big 10}
+          a (-> players
+                first
+                :action-ch)
+          b1 (->Bet 5 #{1 2 3})
+          b2 (->Bet 5 #{1 2 3})
+          b12 (->Bet 10 #{1 2 3})
+          b3 (->Bet 10 #{1})
+
+          end-board (game players blinds)]
+      (>!! a 0) ;; player 3 calls
+      (>!! a 10)  ;; player 1 raises
+      (>!! a -1) ;; player 2 folds
+      (>!! a -1) ;; player 3 folds
+      (let [realized @end-board]
+        (is (= [1] (map :id (:remaining-players realized))))
+        (is (= [1] (map :id (:players realized))))
+        (is (= [] (:bets realized)))
+        (is (= [b12 b3] (:pots realized))))))
+  (testing "no one left after flop"
+    (let [ps (player-gen)
+          [p1 p2 p3 :as players] (take 3 ps)
+          _ (doseq [p players] (run p))
+          blinds {:small 5 :big 10}
+          a (-> players
+                first
+                :action-ch)
+          b1 (->Bet 5 #{1 2 3})
+          b2 (->Bet 5 #{1 2 3})
+          b12 (->Bet 10 #{1 2 3})
+          b3 (->Bet 10 #{1})
+
+          end-board (game players blinds)]
+      (>!! a 0) ;; player 3 calls
+      (>!! a 0)  ;; player 1 calls
+      (>!! a -1) ;; player 2 folds
+      ;; flop
+      (>!! a 10) ;; player 1 raises
+      (>!! a -1) ;; player 3 folds
+      (let [realized @end-board]
+        (is (= [1] (map :id (:remaining-players realized))))
+        (is (= [1] (map :id (:players realized))))
+        (is (= [] (:bets realized)))
+        (is (= [b12 b3] (:pots realized))))))
+    (testing "all the way to showdown"
+    (let [ps (player-gen)
+          [p1 p2 p3 :as players] (take 3 ps)
+          _ (doseq [p players] (run p))
+          blinds {:small 5 :big 10}
+          a (-> players
+                first
+                :action-ch)
+          b1 (->Bet 5 #{1 2 3})
+          b2 (->Bet 5 #{1 2 3})
+          b12 (->Bet 10 #{1 2 3})
+          b3 (->Bet 10 #{1 3})
+          b4 (->Bet 17 #{3})
+
+          end-board (game players blinds)]
+      (>!! a 0) ;; player 3 calls
+      (>!! a 0)  ;; player 1 calls
+      (>!! a -1) ;; player 2 folds
+      ;; flop
+      (>!! a 10) ;; player 1 raises
+      (>!! a 0) ;; player 3 calls
+      ;; turn
+      (>!! a 0) ;; player 1 calls
+      (>!! a 17);; player 3 raises
+      (>!! a -1) ;; player 1 folds
+      (let [realized @end-board]
+        (is (= [3] (map :id (:remaining-players realized))))
+        (is (= [3] (map :id (:players realized))))
+        (is (= [] (:bets realized)))
+        (is (= [b12 b3 b4] (:pots realized)))))))
