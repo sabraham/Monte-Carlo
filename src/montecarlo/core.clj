@@ -9,6 +9,11 @@
 (defrecord Card
     [suit rank])
 
+(def COMPLETE-DECK
+  (for [suit [:hearts :diamonds :spades :clubs]
+        rank (range 2 15)]
+    (->Card suit rank)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Bet
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -24,75 +29,13 @@
     [pot players]) ;; player-ids
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;  Player
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defrecord Player
-    [id stack hand
-     action-ch ;; Action :: player -> main -_-
-     card-ch ;; Card :: board -> player
-     board-ch ;; Board :: board -> player
-     quit-ch])
-
-(defprotocol PlayerP
-  (run [this])
-  (public-player [this]))
-
-(extend-type Player
-  PlayerP
-  (run [this]
-    (go (while true
-          (alt! (:card-ch this)  ([card]
-                                    (do
-                                      (swap! (:hand this) conj card)))
-                (:board-ch this) ([board] ;(println (:id this) " received update")
-                                    )
-                (:quit-ch this)  ([s] (println "i don't know to quit you."))))))
-  (public-player [this]
-    (select-keys this [:id :stack])))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Board
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defrecord Board
-    [community-cards
-     bets    ;; list of Bet
-     pots    ;; list of Pot
-     remaining-players ;; players who have not yet played
-     play-order ;; typically (cycle remaining-players)
-     players ;; players still in hand
-     blinds ;; blinds
-     ])
-
-(defprotocol BoardP
-  (read-board [this])
-  (update-players [this]))
-
-(extend-type Board
-  BoardP
-  (read-board [this]
-    (let [public-board (select-keys this [:community-cards :bets :pots
-                                          :remaining-players :play-order
-                                          :blinds])]
-      (assoc public-board :players (map public-player (:players this)))))
-  (update-players [this]
-    (let [new-board (read-board this)]
-      (doseq [ch (map :board-ch (:players this))]
-        (go (>! ch new-board))))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Constants
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(def COMPLETE-DECK
-  (for [suit [:hearts :diamonds :spades :clubs]
-        rank (range 2 15)]
-    (->Card suit rank)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Action
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defprotocol ActionP
+  (call [this] [this bet-amt])
+  (fold [this])
+  (raise [this r] [this prev-bet-amt r]))
 
 (defn is-fold?
   [action]
@@ -156,60 +99,145 @@
 
 (defn board->total-bet
   [board]
-  (reduce + (map :bet (:bets board))))
+  (if-let [total-bet (reduce + (map :bet (:bets board)))]
+    total-bet
+    0))
+
+(defn board->needed-bet
+  [board player-id]
+  (let [unmet-bets (filter #(not (contains? (:players %) player-id)) (:bets board))]
+    (if-let [bet (reduce + (map :bet unmet-bets))]
+      bet
+      0)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Player
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrecord Player
+    [id stack hand
+     listen-ch ;; Action :: real player -> logical player
+     action-ch ;; Action :: logical player -> board
+     card-ch ;; Card :: board -> logical player
+     board-ch ;; Board :: board -> logical player
+     quit-ch])
+
+(extend-type Player
+  ActionP
+  (fold [this] (println "player folded"))
+  (call [this total-bet] (swap! (:stack this) #(max 0 (- % total-bet)))
+    (println "player called"))
+  (raise [this r total-bet]
+    (println "player to raise")
+    (swap! (:stack this) #(max 0 (- % total-bet r)))))
+
+(defn run
+  [player]
+  (go
+   (while true
+     (alt!
+      (:card-ch player)  ([card]
+                            (swap! (:hand player) conj card))
+      (:board-ch player) ([board]
+                            (when (= (:id player)
+                                     (first (:play-order board)))
+                              (do
+                                (let [action (<!! (:listen-ch player))]
+                                  (println (str "player " (:id player) " action: " action))
+                                  (cond
+                                   (is-fold? action) (fold player)
+                                   (is-call? action) (call player
+                                                           (board->needed-bet board
+                                                                              (:id player)))
+                                   (is-raise? action) (raise player
+                                                             (action->raise action)
+                                                             (board->needed-bet board (:id player)))
+                                   :else (throw (Exception. "Action is not fold nor call nor raise!")))
+                                  (>!! (:action-ch player) action)
+                                  ;; TODO here: send update to real player
+                                  ))))
+      (:quit-ch player)  ([s] (println "i don't know how to quit you."))))))
+
+(defn public-player [player]
+    (select-keys player [:id :stack]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Board
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn fold
-  [board]
-  (let [player (first (:play-order board))
-        remaining-players (remove #{player} (:remaining-players board))
-        play-order (filter #(not (= player %)) (:play-order board))
-        players (remove #(= player (:id %)) (:players board))]
-    (assoc board :remaining-players remaining-players :play-order play-order
-           :players players)))
+(defrecord Board
+    [community-cards
+     bets    ;; list of Bet
+     pots    ;; list of Pot
+     remaining-players ;; players who have not yet played
+     play-order ;; typically (cycle remaining-players)
+     players ;; players still in hand
+     blinds ;; blinds
+     ])
 
-(defn raise
-  [board r]
-  (let [player (first (:play-order board))
-        new-bet (->Bet (+ r (board->total-bet board))
-                       #{player})
-        bets (update-bets (:bets board) new-bet)]
-    (assoc board
-      :bets (merge-bets bets)
-      :play-order (rest (:play-order board))
-      :remaining-players (remove #{player} (map :id (:players board))))))
-
-(defn call
+(defn read-board
   [board]
-  (let [player (first (:play-order board))
-        bet-amt (board->total-bet board)]
-    (if (pos? bet-amt)
-      (let [new-bet (->Bet bet-amt
-                           #{player})
-            bets (update-bets (:bets board) new-bet)]
-        (assoc board
-          :bets (merge-bets bets)
-          :play-order (rest (:play-order board))
-          :remaining-players (remove #{player} (:remaining-players board))))
-      (assoc board
-        :bets (merge-bets (:bets board))
-        :play-order (rest (:play-order board))
-        :remaining-players (remove #{player} (:remaining-players board))))))
+  (let [public-board (select-keys board [:community-cards :bets :pots
+                                         :remaining-players :play-order
+                                         :blinds])]
+    (assoc public-board :players (map public-player (:players board)))))
+
+(defn update-players
+  [board]
+  (let [new-board (read-board board)]
+    (doseq [ch (map :board-ch (:players board))]
+      (go (>! ch new-board)))))
+
+(extend-type Board
+  ActionP
+  (fold [this]
+    (let [player (first (:play-order this))
+          remaining-players (remove #{player} (:remaining-players this))
+          play-order (filter #(not (= player %)) (:play-order this))
+          players (remove #(= player (:id %)) (:players this))]
+      (assoc this :remaining-players remaining-players :play-order play-order
+             :players players)))
+  (call [this]
+    (let [player (first (:play-order this))
+          bet-amt (board->total-bet this)]
+      (if (pos? bet-amt)
+        (let [new-bet (->Bet bet-amt
+                             #{player})
+              bets (update-bets (:bets this) new-bet)]
+          (assoc this
+            :bets (merge-bets bets)
+            :play-order (rest (:play-order this))
+            :remaining-players (remove #{player} (:remaining-players this))))
+        (assoc this
+          :bets (merge-bets (:bets this))
+          :play-order (rest (:play-order this))
+          :remaining-players (remove #{player} (:remaining-players this))))))
+  (raise [this r]
+    (let [player (first (:play-order this))
+          new-bet (->Bet (+ r (board->total-bet this))
+                         #{player})
+          bets (update-bets (:bets this) new-bet)]
+      (assoc this
+        :bets (merge-bets bets)
+        :play-order (rest (:play-order this))
+        :remaining-players (remove #{player} (map :id (:players this)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stages
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn stage-end?
-  [board]
-  (empty? (:remaining-players board)))
-
 (defn game-end?
   [board]
   (empty? (rest (:players board))))
+
+(defn stage-end?
+  [board]
+  (do
+    (println (str "stage-end: "         (or (empty? (:remaining-players board))
+                                            (game-end? board))))
+    (or (empty? (:remaining-players board))
+        (game-end? board))))
+
 
 (defn stage-transition
   [board]
@@ -222,10 +250,22 @@
 (defn play-stage
   [board action-ch]
   (loop [board board]
+    (println (str "\n"
+                  "players: " (seq (map :id (:players board))) "\n"
+                  "remaining-players: " (seq (:remaining-players board)) "\n"
+                  "play-order: " (seq (take 4 (:play-order board))) "\n"
+                  "bets: " (seq (:bets board))
+                  "\n"))
     (let [player (first (:play-order board))]
       (if (stage-end? board)
-        (stage-transition board)
+        (do
+          (println "it is the stage-end!")
+          (stage-transition board))
         (let [action (<!! action-ch)]
+          (println (str "\n"
+                        "play-stage:\n"
+                        "action: " action
+                        "\n"))
           (cond
            (is-fold? action) (let [res (fold board)]
                                (update-players res)
@@ -236,13 +276,13 @@
            (is-raise? action) (let [res (raise board (action->raise action))]
                                 (update-players res)
                                 (recur res))
-           :else (throw "Action is not fold nor call nor raise!")))))))
+           :else (throw (Exception. "Action is not fold nor call nor raise!"))))))))
 
 (defn init-board
   [players blinds]
   (let [community-cards (list)
-        pots (list)
         bets (list)
+        pots (list)
         remaining-players (map :id players)
         play-order (cycle remaining-players)]
     (->Board community-cards bets pots
@@ -282,19 +322,47 @@
   [board deck]
   (deal-community board deck 1))
 
+;; (comment
+;;   (defn play-blinds
+;;     [board]
+;;     (-> board
+;;         (raise (get-in board [:blinds :small]))
+;;         (raise (- (get-in board [:blinds :big])
+;;                   (get-in board [:blinds :small])))
+;;         (assoc :remaining-players (map :id (:players board))))))
+
 (defn play-blinds
   [board]
-  (-> board
-      (raise (get-in board [:blinds :small]))
-      (raise (- (get-in board [:blinds :big])
-                (get-in board [:blinds :small])))
-      (assoc :remaining-players (map :id (:players board)))))
+  (let [[l1 l2] (map :listen-ch  (take 2 (:players board)))
+        small-blind (get-in board [:blinds :small])
+        big-blind (get-in board [:blinds :big])
+        a (-> board :players first :action-ch)]
+    (println "begin play-blinds")
+    (>!! l1 small-blind)
+    (update-players board)
+    (<!! a) ;; discard item in action-ch
+    (println "updated board")
+    ;; players get board with no play, but p1 will get
+    ;; stack deducted
+    (let [board (raise board small-blind)]
+      ;; board now has that p1 put in small blind and play has moved to p2
+      (println "begin l2")
+      (>!! l2 (- big-blind small-blind))
+      (update-players board)
+      (<!! a) ;; discard item in action-ch
+      (println "updated board - 2")
+      ;; players get the board with small-blind
+      (let [board (raise board (- big-blind small-blind))]
+        ;; board now has that p2 has put in big blind
+        (println (str "blinds: player to play is " (-> board :play-order first)))
+        (assoc board :remaining-players (map :id (:players board)))))))
 
 (defn preflop-stage
   [board action-ch]
-  (-> board
-      play-blinds
-      (play-stage action-ch)))
+  (let [blinds-board (play-blinds board)]
+    (println (str "preflop-stage: player to play is " (-> blinds-board :play-order first)))
+    (update-players blinds-board) ;;
+    (play-stage blinds-board action-ch)))
 
 (defn game
   [players blinds]
@@ -310,6 +378,7 @@
         board
         ;; flop stage
         (let [{:keys [board deck]} (flop board (burn deck))
+              _ (update-players board)
               board (play-stage board action-ch)]
           (if (game-end? board)
             board
