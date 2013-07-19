@@ -150,13 +150,18 @@
     (dosync
      (alter (:stack this) #(max 0 (- % total-bet r))))))
 
+(defn stage-end?
+  [board]
+  (empty? (deref (:remaining-players board))))
+
 (defn game-end?
   [board]
   (debug-board board "game-end")
   (println (str "stage is: " (deref (:stage board))))
   (or (empty? (rest (deref (:players board))))
-      (= 4
-         (deref (:stage board)))))
+      (and (stage-end? board)
+           (= 3
+              (deref (:stage board))))))
 
 (defn player-action
   [player board]
@@ -234,15 +239,44 @@
    (is-raise? action) (println "is raise!!" (raise board (action->raise action)))
    :else (throw (Exception. "Action is not fold nor call nor raise!"))))
 
-(defn stage-end?
-  [board]
-  (or (empty? (deref (:remaining-players board)))
-      (game-end? board)))
 
+(defn burn
+  [deck]
+  (dosync
+   (alter deck #(drop 1 %))))
+
+(defn deal-community
+  [board n]
+  (dosync
+   (alter (:community-cards board) conj (take n (deref (:deck board))))
+   (alter (:deck board) #(drop n %))))
+
+(defn flop
+  [board]
+  (burn (:deck board))
+  (deal-community board 3))
+
+(defn turn
+  [board]
+  (burn (:deck board))
+  (deal-community board 1))
+
+(defn river
+  [board]
+  (burn (:deck board))
+  (deal-community board 1))
+
+(defn deal-stage
+  [board]
+  (condp = (deref (:stage board))
+    0 (flop board)
+    1 (turn board)
+    2 (river board)))
 
 (defn stage-transition
   [board]
   (dosync
+   (deal-stage board)
    (alter (:remaining-players board) (fn [_] (board->player-ids board)))
    (alter (:pots board) concat (deref (:bets board)))
    (alter (:bets board) (fn [_] (list)))
@@ -258,13 +292,12 @@
 (defn board-action
   [board action]
   (do-action action board)
-  (if (stage-end? board)
+  (if (game-end? board)
+    (end-game board)
     (do
-      (stage-transition board)
-      (if (game-end? board)
-        (end-game board)
-        (update-players board)))
-    (update-players board)))
+      (when (stage-end? board)
+        (stage-transition board))
+      (update-players board))))
 
 (defn run-board
   [board]
@@ -316,40 +349,18 @@
 
 (defn init-board
   [players blinds action-ch]
-  (let [community-cards (list)
+  (let [community-cards (ref (list))
         bets (ref (list))
         pots (ref (list))
         remaining-players (ref (map :id players))
         play-order (ref (cycle (map :id players)))
         stage (ref 0)
-        deck (ref COMPLETE-DECK)
+        deck (ref (shuffle COMPLETE-DECK))
         players (ref players)
         quit-ch (chan)]
     (->Board community-cards bets pots
              remaining-players play-order players blinds stage deck
              action-ch quit-ch)))
-
-(defn burn
-  [deck]
-  (rest deck))
-
-(defn deal-community
-  [board deck n]
-  (dosync
-   (alter (:community-cards board) conj (take n @deck))
-   (alter deck #(drop n %))))
-
-(defn flop
-  [board deck]
-  (deal-community board deck 3))
-
-(defn turn
-  [board deck]
-  (deal-community board deck 1))
-
-(defn river
-  [board deck]
-  (deal-community board deck 1))
 
 (defn deal-hand
   [board]
