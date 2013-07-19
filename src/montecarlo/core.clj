@@ -1,6 +1,7 @@
 (ns montecarlo.core
   (require [clojure.core.async :as async
-            :refer [<! >! <!! >!! timeout chan alt! alts!! go close!]]))
+            :refer [<! >! <!! >!! timeout chan alt! alts!! go close!]]
+           [montecarlo.card :as card]))
 
 (defn board->player-ids
   [board]
@@ -15,18 +16,6 @@
                 "play-order: " (seq (take 4 (deref (:play-order board)))) "\n"
                 "bets: " (seq (deref (:bets board))) "\n"
                 "\n")))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Card
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defrecord Card
-    [suit rank])
-
-(def COMPLETE-DECK
-  (for [suit [:hearts :diamonds :spades :clubs]
-        rank (range 2 15)]
-    (->Card suit rank)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Bet
@@ -355,7 +344,7 @@
         remaining-players (ref (map :id players))
         play-order (ref (cycle (map :id players)))
         stage (ref 0)
-        deck (ref (shuffle COMPLETE-DECK))
+        deck (ref (shuffle card/COMPLETE-DECK))
         players (ref players)
         quit-ch (chan)]
     (->Board community-cards bets pots
