@@ -5,11 +5,13 @@
 
 (defn constant-coll?
   [coll]
-  (every? true? (map = coll (rest coll))))
+  (when (every? true? (map = coll (rest coll)))
+    coll))
 
-(defn remove-first [x coll]
-  (let [[pre post] (split-with #(not= x %) coll)]
-    (concat pre (rest post))))
+(defn constant-cards?
+  [cards att]
+  (when (constant-coll? (map att cards))
+    cards))
 
 ;; NAIVE
 
@@ -17,19 +19,21 @@
   [cards]
   (loop [[x & xs] (sort (map :rank cards))]
     (if (empty? xs)
-      true
+      cards
       (when (= (inc x)
                (first xs))
         (recur (rest xs))))))
 
 (defn flush?
   [cards]
-  (constant-coll? (map :suit cards)))
+  (constant-cards? cards :suit))
+
+(constant-cards?
+ (take 4 card/COMPLETE-DECK) :suit)
 
 (defn n-of-a-kind?
   [cards n]
-  (let [ranks (map :rank cards)]
-    (some constant-coll? (combo/combinations ranks n))))
+  (some #(constant-cards? % :rank) (combo/combinations cards n)))
 
 (defn four-of-a-kind?
   [cards]
@@ -45,10 +49,11 @@
 
 (defn n-pairs?
   [cards k1 k2]
-  (let [perms (combo/permutations (map :rank cards))
-        poss  (distinct (map #(map sort [(take k1 %) (take k2 (drop k1 %))])
+  (let [perms (combo/permutations cards)
+        sorter (fn [x] (sort-by :rank x))
+        poss  (distinct (map #(map sorter [(take k1 %) (take k2 (drop k1 %))])
                              perms))]
-    (some #(every? true? (map constant-coll? %))
+    (some (fn [poss] (every? #(constant-cards? % :rank) poss))
           poss)))
 
 (defn full-house?
