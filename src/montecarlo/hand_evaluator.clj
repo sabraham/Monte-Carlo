@@ -29,14 +29,15 @@
       hand-a
       hand-b)))
 
-(defn straight? ;; maybe faster to sum ranks and check = what straight should equal
+(defn straight?
   [cards]
-  (loop [[x & xs] (sort (map :rank cards))]
-    (if (empty? xs)
-      cards
-      (when (= (inc x)
-               (first xs))
-        (recur (rest xs))))))
+  (loop [ranks (sort (map :rank cards))]
+    (let [[x & xs] ranks]
+      (if (empty? xs)
+        cards
+        (when (= (inc x)
+                 (first xs))
+          (recur (rest ranks)))))))
 
 (defn flush?
   [cards]
@@ -72,9 +73,17 @@
   (let [perms (combo/permutations cards)
         sorter (fn [x] (sort-by :rank x))
         poss  (distinct (map #(map sorter [(take k1 %) (take k2 (drop k1 %))])
-                             perms))]
-    (some (fn [poss] (every? #(constant-cards? % :rank) poss))
-          poss)))
+                             perms))
+        hits (filter (fn [poss] (every? #(constant-cards? % :rank) poss))
+                     poss)]
+    (first hits)))
+
+(n-pairs? [(card/->Card :h 9)
+           (card/->Card :d 8)
+           (card/->Card :s 9)
+           (card/->Card :c 8)
+           (card/->Card :h 8)]
+          3 2)
 
 (defn full-house?
   [cards]
@@ -84,6 +93,41 @@
   [cards]
   (n-pairs? cards 2 2))
 
-(defn high-card?
+(defn cards->ranks
   [cards]
-  (reduce high-card cards))
+  (sort > (map :rank cards)))
+
+(defn ret
+  [value cards hit]
+  [value (cards->ranks hit) (cards->ranks (remove (set hit) cards))])
+
+(defn ret-full-house
+  [cards hit]
+  [6 (map :rank (flatten hit)) (list)])
+
+(defn ret-two-pair
+  [cards hit]
+  [2 (cards->ranks (flatten hit)) (cards->ranks (remove (set (flatten hit)) cards))])
+
+(defn evaluator
+  [cards]
+  (let [is-straight (straight? cards)
+        is-flush (flush? cards)
+        ranks (cards->ranks cards)]
+    (if (and is-straight is-flush)
+      [8 ranks (list)]
+      (if-let [hit (four-of-a-kind? cards)]
+        (ret 7 cards hit)
+        (if-let [hit (full-house? cards)]
+          (ret-full-house cards hit)
+          (if is-flush
+            [5 ranks (list)]
+            (if is-straight
+              [4 ranks (list)]
+              (if-let [hit (three-of-a-kind? cards)]
+                (ret 3 cards hit)
+                (if-let [hit (two-pair? cards)]
+                  (ret-two-pair cards hit)
+                  (if-let [hit (pair? cards)]
+                    (ret 1 cards hit)
+                    (ret 0 (list) cards)))))))))))
