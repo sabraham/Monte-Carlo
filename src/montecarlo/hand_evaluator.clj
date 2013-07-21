@@ -15,6 +15,20 @@
 
 ;; NAIVE
 
+(defn high-card
+  [card-a card-b]
+  (if (pos? (compare (:rank card-a) (:rank card-b)))
+    card-a
+    card-b))
+
+(defn high-hand
+  [hand-a hand-b]
+  (let [high-a (reduce high-card hand-a)
+        high-b (reduce high-card hand-b)]
+    (if (= (high-card high-a high-b) high-a)
+      hand-a
+      hand-b)))
+
 (defn straight? ;; maybe faster to sum ranks and check = what straight should equal
   [cards]
   (loop [[x & xs] (sort (map :rank cards))]
@@ -28,12 +42,18 @@
   [cards]
   (constant-cards? cards :suit))
 
-(constant-cards?
- (take 4 card/COMPLETE-DECK) :suit)
+(defn n-of-a-kinds
+  [cards n]
+  (filter #(constant-cards? % :rank)
+          (combo/combinations cards n)))
 
 (defn n-of-a-kind?
   [cards n]
-  (some #(constant-cards? % :rank) (combo/combinations cards n)))
+  (let [kinds (n-of-a-kinds cards n)]
+    (when (not (empty? kinds))
+      (reduce high-hand kinds))))
+
+(reduce high-hand (n-of-a-kinds (filter #(= 2 (:rank %)) card/COMPLETE-DECK) 3))
 
 (defn four-of-a-kind?
   [cards]
@@ -63,3 +83,7 @@
 (defn two-pair?
   [cards]
   (n-pairs? cards 2 2))
+
+(defn high-card?
+  [cards]
+  (reduce high-card cards))
