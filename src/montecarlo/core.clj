@@ -4,7 +4,8 @@
            [montecarlo.card :as card]
            [montecarlo.hand-evaluator :as evaluator]
            [clojure.math.combinatorics :as combo]
-           [montecarlo.bet :refer :all]))
+           [montecarlo.bet :refer :all]
+           [montecarlo.action :refer :all]))
 
 (defn board->player-ids
   [board]
@@ -19,31 +20,6 @@
                 "play-order: " (seq (take 4 (deref (:play-order board)))) "\n"
                 "bets: " (seq (deref (:bets board))) "\n"
                 "\n")))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Action
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defprotocol ActionP
-  (call [this] [this bet-amt])
-  (fold [this])
-  (raise [this r] [this prev-bet-amt r]))
-
-(defn is-fold?
-  [action]
-  (neg? action))
-
-(defn is-call?
-  [action]
-  (= action 0))
-
-(defn is-raise?
-  [action]
-  (pos? action))
-
-(defn action->raise
-  [r]
-  r)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Bets & Board
@@ -124,13 +100,11 @@
 
 (extend-type Player
   ActionP
-  (fold [this] (println "player folded"))
+  (fold [this])
   (call [this total-bet]
     (dosync
-     (alter (:stack this) #(max 0 (- % total-bet))))
-    (println "player called"))
+     (alter (:stack this) #(max 0 (- % total-bet)))))
   (raise [this r total-bet]
-    (println "player to raise")
     (dosync
      (alter (:stack this) #(max 0 (- % total-bet r))))))
 
@@ -140,8 +114,6 @@
 
 (defn game-end?
   [board]
-  (debug-board board "game-end")
-  (println (str "stage is: " (deref (:stage board))))
   (or (empty? (rest (deref (:players board))))
       (and (stage-end? board)
            (= 3
@@ -149,7 +121,6 @@
 
 (defn player-action
   [player board]
-  (println (type board))
   (when (and (= (:id player)
                 (first (deref (:play-order board))))
              (not (game-end? board)))
@@ -220,9 +191,8 @@
   (cond
    (is-fold? action) (fold board)
    (is-call? action) (call board)
-   (is-raise? action) (println "is raise!!" (raise board (action->raise action)))
+   (is-raise? action) (raise board (action->raise action))
    :else (throw (Exception. "Action is not fold nor call nor raise!"))))
-
 
 (defn burn
   [deck]

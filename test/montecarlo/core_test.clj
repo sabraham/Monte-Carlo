@@ -2,7 +2,8 @@
   (require [clojure.core.async :as async
             :refer [<! >! <!! >!! timeout chan alt! alts!! go close! sliding-buffer]])
   (:use clojure.test
-        montecarlo.core))
+        montecarlo.core
+        montecarlo.bet))
 
 (defn player-gen
   []
@@ -479,7 +480,7 @@
     (>!! l3 0)
     ;;turn
     (>!! l1 10)
-    (>!! l3 0)
+    (>!! l3 -1)
     ;;river
     (>!! l1 10)
     (>!! l3 0)
