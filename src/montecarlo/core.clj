@@ -1,7 +1,9 @@
 (ns montecarlo.core
   (require [clojure.core.async :as async
             :refer [<! >! <!! >!! timeout chan alt! alts!! go close!]]
-           [montecarlo.card :as card]))
+           [montecarlo.card :as card]
+           [montecarlo.hand-evaluator :as evaluator]
+           [clojure.math.combinatorics :as combo]))
 
 (defn board->player-ids
   [board]
@@ -208,10 +210,10 @@
 (defn read-board
   [board]
   (comment
-   (let [public-board (select-keys board [:community-cards :bets :pots
-                                          :remaining-players :play-order
-                                          :blinds])]
-     (assoc public-board :players (map public-player (:players board)))))
+    (let [public-board (select-keys board [:community-cards :bets :pots
+                                           :remaining-players :play-order
+                                           :blinds])]
+      (assoc public-board :players (map public-player (:players board)))))
   board)
 
 (defn update-players
@@ -237,7 +239,7 @@
 (defn deal-community
   [board n]
   (dosync
-   (alter (:community-cards board) conj (take n (deref (:deck board))))
+   (alter (:community-cards board) concat (take n (deref (:deck board))))
    (alter (:deck board) #(drop n %))))
 
 (defn flop
@@ -262,6 +264,12 @@
     1 (turn board)
     2 (river board)))
 
+(defn board->pot
+  [board]
+  (let [bets (deref (:bets board))]
+    (->Bet (reduce + (map :bet bets))
+           (-> bets last :players))))
+
 (defn stage-transition
   [board]
   (dosync
@@ -270,13 +278,61 @@
    (alter (:pots board) concat (deref (:bets board)))
    (alter (:bets board) (fn [_] (list)))
    (alter (:play-order board) (fn [_] (cycle (board->player-ids board))))
-   (alter (:stage board) inc)
-   ))
+   (alter (:stage board) inc)))
+
+(defn comparable-hand-values
+  [val-a val-b]
+  (loop [l val-a
+         r val-b
+         l-stack (list)
+         r-stack (list)]
+    (if (> (count l) (count r))
+      1
+      (if (< (count l) (count r))
+        -1
+        (if (empty? l)
+          (if (empty? l-stack)
+            0
+            (recur (first l-stack) (first r-stack) (rest l-stack) (rest r-stack)))
+          (let [[x & xs] l
+                [y & ys] r]
+            (if (coll? x)
+              (recur x y (conj l-stack x) (conj r-stack y))
+              (let [c (compare x y)]
+                (if (= c 0)
+                  (recur xs ys l-stack r-stack)
+                  c)))))))))
+
+(defn compare-hand-values
+  [val-a val-b]
+  (if (neg? (comparable-hand-values val-a val-b))
+    val-b
+    val-a))
+
+(defn player->hand-value
+  [board player]
+  (let [pocket (:hand player)
+        available-cards (concat (deref (:community-cards board)) @pocket)
+        hands (combo/combinations available-cards 5)]
+    (reduce compare-hand-values (map evaluator/evaluator hands))))
+
+(defn update-stacks
+  [pots winners]
+  (doseq [pot (deref pots)]
+    (dosync
+     (alter (:stack (first (filter #((:players pot) (:id %)) winners)))
+            #(+ (:bet pot) %)))))
+
+(some #{1 2 3} [4 5 8 2 3 1 9])
 
 (defn end-game
   [board]
-  (let [winner 1]
-    (println "end game!")))
+  (let [hand-values (map #(player->hand-value board %) (deref (:players board)))
+        winners (reverse (map :player (sort-by :hand-value comparable-hand-values
+                                               (map #(hash-map :player %1 :hand-value %2)
+                                                    (deref (:players board))
+                                                    hand-values))))]
+    (update-stacks (:pots board) winners)))
 
 (defn board-action
   [board action]
@@ -303,6 +359,9 @@
   (fold [this]
     (let [player (first (deref (:play-order this)))]
       (dosync
+       (alter (:bets this) (fn [x] (merge-bets (map #(->Bet (:bet %)
+                                                            (disj (:players %) player))
+                                                    x))))
        (alter (:remaining-players this) #(remove #{player} %))
        (alter (:play-order this) (fn [x] (filter #(not (= player %)) x)))
        (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
