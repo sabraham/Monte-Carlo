@@ -24,7 +24,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord Bet
-    [bet players]) ;; player-ids
+    [bet players original-players]) ;; player-ids
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Pot
@@ -64,12 +64,15 @@
 
 (defn split-bet
   [bet x player]
-  [(->Bet x (conj (:players bet) player))
+  [(->Bet x (conj (:players bet) player) (conj (:original-players bet) player))
    (update-in bet [:bet] #(- % x))])
 
 (defn call-bet
   [bets player]
-  (conj (rest bets) (update-in (first bets) [:players] #(conj % player))))
+  (let [bet (first bets)]
+    (conj (rest bets) (assoc bet
+                        :players (conj (:players bet) player)
+                        :original-players (conj (:original-players bet) player)))))
 
 (defn merge-bets
   [bets]
@@ -77,10 +80,13 @@
          output (list)]
     (if-let [bet-i (first input)]
       (let [bet-o (first output)]
-        (if (= (:players bet-i) (:players bet-o))
+        (if (and (= (:players bet-i) (:players bet-o))
+                 (= (:original-players bet-i) (:original-players bet-o)))
           (recur (rest input)
                  (conj (rest output)
-                       (->Bet (+ (:bet bet-i) (:bet bet-o)) (:players bet-i))))
+                       (->Bet (+ (:bet bet-i) (:bet bet-o))
+                              (:players bet-i)
+                              (:original-players bet-i))))
           (recur (rest input)
                  (conj output
                        bet-i))))
@@ -100,7 +106,7 @@
          (> bet (:bet standing-bet)) (recur (rest bets)
                                             (- bet (:bet standing-bet))
                                             (conj ret (first (call-bet bets player)))))
-        (concat ret [(->Bet bet #{player})])))))
+        (concat ret [(->Bet bet #{player} #{player})])))))
 
 (defn board->total-bet
   [board]
@@ -264,12 +270,6 @@
     1 (turn board)
     2 (river board)))
 
-(defn board->pot
-  [board]
-  (let [bets (deref (:bets board))]
-    (->Bet (reduce + (map :bet bets))
-           (-> bets last :players))))
-
 (defn stage-transition
   [board]
   (dosync
@@ -321,12 +321,13 @@
   (doseq [pot (deref pots)]
     (dosync
      (alter (:stack (first (filter #((:players pot) (:id %)) winners)))
-            #(+ (:bet pot) %)))))
-
-(some #{1 2 3} [4 5 8 2 3 1 9])
+            #(+ (* (:bet pot) (count (:original-players pot))) %)))))
 
 (defn end-game
   [board]
+  (dosync
+   (alter (:pots board) concat (deref (:bets board)))
+   (alter (:bets board) (fn [_] (list))))
   (let [hand-values (map #(player->hand-value board %) (deref (:players board)))
         winners (reverse (map :player (sort-by :hand-value comparable-hand-values
                                                (map #(hash-map :player %1 :hand-value %2)
@@ -360,7 +361,8 @@
     (let [player (first (deref (:play-order this)))]
       (dosync
        (alter (:bets this) (fn [x] (merge-bets (map #(->Bet (:bet %)
-                                                            (disj (:players %) player))
+                                                            (disj (:players %) player)
+                                                            (:original-players %))
                                                     x))))
        (alter (:remaining-players this) #(remove #{player} %))
        (alter (:play-order this) (fn [x] (filter #(not (= player %)) x)))
@@ -371,7 +373,7 @@
           bet-amt (board->total-bet this)]
       (if (pos? bet-amt)
         (let [new-bet (->Bet bet-amt
-                             #{player})]
+                             #{player} #{player})]
           (dosync
            (alter (:bets this) update-bets new-bet)
            (alter (:play-order this) rest)
@@ -383,6 +385,7 @@
   (raise [this r]
     (let [player (first (deref (:play-order this)))
           new-bet (->Bet (+ r (board->total-bet this))
+                         #{player}
                          #{player})]
       (dosync
        (alter (:bets this) update-bets new-bet)
@@ -428,11 +431,11 @@
         [p1 p2] (take 2 (deref (:players board)))]
     (dosync
      (alter (:stack p1) #(- % small))
-     (alter (:bets board) update-bets (->Bet small #{(:id p1)})))
+     (alter (:bets board) update-bets (->Bet small #{(:id p1)} #{(:id p1)})))
     (dosync
      (alter (:play-order board) #(drop 2 %))
      (alter (:stack p2) #(- % big))
-     (alter (:bets board) update-bets (->Bet big #{(:id p2)})))))
+     (alter (:bets board) update-bets (->Bet big #{(:id p2)} #{(:id p2)})))))
 
 (defn game
   [players blinds a]
