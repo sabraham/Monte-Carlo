@@ -3,7 +3,8 @@
             :refer [<! >! <!! >!! timeout chan alt! alts!! go close!]]
            [montecarlo.card :as card]
            [montecarlo.hand-evaluator :as evaluator]
-           [clojure.math.combinatorics :as combo]))
+           [clojure.math.combinatorics :as combo]
+           [montecarlo.bet :refer :all]))
 
 (defn board->player-ids
   [board]
@@ -18,13 +19,6 @@
                 "play-order: " (seq (take 4 (deref (:play-order board)))) "\n"
                 "bets: " (seq (deref (:bets board))) "\n"
                 "\n")))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Bet
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defrecord Bet
-    [bet players original-players]) ;; player-ids
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Pot
