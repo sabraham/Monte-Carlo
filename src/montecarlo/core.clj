@@ -1,11 +1,16 @@
 (ns montecarlo.core
   (require [clojure.core.async :as async
-            :refer [<! >! <!! >!! timeout chan alt! alts!! go close!]]
+            :refer [<! >! <!! >!! timeout chan alt! alts!! go close!
+                    sliding-buffer]]
            [montecarlo.card :as card]
            [montecarlo.hand-evaluator :as evaluator]
            [clojure.math.combinatorics :as combo]
            [montecarlo.bet :refer :all]
-           [montecarlo.action :refer :all]))
+           [montecarlo.action :refer :all]
+           [cheshire.core :refer :all]
+           [gloss.core :as gloss])
+  (use [lamina.core]
+       [aleph.tcp]))
 
 (defn board->player-ids
   [board]
@@ -93,9 +98,10 @@
 (defrecord Player
     [id stack hand
      listen-ch ;; Action :: real player -> logical player
-     action-ch ;; Action :: logical player -> board
+     ;;     action-ch ;; Action :: logical player -> board
      card-ch ;; Card :: board -> logical player
      board-ch ;; Board :: board -> logical player
+     out-ch ;; logical player ->  real player
      quit-ch])
 
 (extend-type Player
@@ -135,9 +141,26 @@
                                    (action->raise action)
                                    (board->needed-bet board (:id player)))
          :else (throw (Exception. "Action is not fold nor call nor raise!")))
-        (>!! (:action-ch player) action)
+        (>!! (:action-ch board) action)
         ;; TODO here: send update to real player
         ))))
+
+(defn public-player [player]
+  {:id (:id player)
+   :stack (deref (:stack player))})
+
+(defn read-board
+  [board]
+  (let [ks [:community-cards :bets :pots :remaining-players :play-order]
+        public-board (zipmap ks (map #(deref (get board %)) ks))
+        public-board (assoc public-board
+                       :play-order (take (count (deref (:players board)))
+                                         (:play-order public-board)))
+        public-board (assoc public-board
+                       :players (map public-player (deref (:players board))))
+        ]
+    (println public-board)
+    (generate-string public-board)))
 
 (defn run
   [player]
@@ -145,13 +168,12 @@
    (while true
      (alt!
       (:card-ch player)  ([card]
-                            (swap! (:hand player) conj card))
+                            (swap! (:hand player) conj card)
+                            (>! (:out-ch player) (generate-string card)))
       (:board-ch player) ([board]
-                            (player-action player board))
+                            (player-action player board)
+                            (>! (:out-ch player) (read-board board)))
       (:quit-ch player)  ([s] (println "i don't know how to quit you."))))))
-
-(defn public-player [player]
-  (select-keys player [:id :stack]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Board
@@ -171,20 +193,11 @@
      quit-ch ;;
      ])
 
-(defn read-board
-  [board]
-  (comment
-    (let [public-board (select-keys board [:community-cards :bets :pots
-                                           :remaining-players :play-order
-                                           :blinds])]
-      (assoc public-board :players (map public-player (:players board)))))
-  board)
 
 (defn update-players
   [board]
-  (let [new-board (read-board board)]
-    (doseq [ch (map :board-ch (deref (:players board)))]
-      (go (>! ch new-board)))))
+  (doseq [ch (map :board-ch (deref (:players board)))]
+    (go (>! ch board))))
 
 (defn do-action
   [action board]
@@ -402,3 +415,62 @@
     (run-board board)
     (deal-hand board)
     (update-players board)))
+
+
+(def GLOBAL-ACTION-CH (chan (sliding-buffer 3)))
+(def PLAYERS-WAITING (chan))
+(def players-atom (atom []))
+(defn players-waiting-fn
+  [p]
+  (if (= (count @players-atom) 2)
+    (game (conj @players-atom p) {:small 5 :big 10} GLOBAL-ACTION-CH)
+    (swap! players-atom conj p)))
+
+
+(go
+ (while true
+   (alt!
+    PLAYERS-WAITING ([p] (players-waiting-fn p)))))
+
+(defn handler
+  [ch client-info]
+  (let [p (->Player (gensym) (ref 100) (atom [])
+                    (chan (sliding-buffer 1))
+                    (chan) (chan) (chan) (chan))]
+    (println "new connection")
+    (go
+     (>! PLAYERS-WAITING p))
+    (receive-all ch #(do (go (>! (:listen-ch p) (Integer/parseInt %)))
+                         (println %)))
+    (go
+     (while true
+       (alt!
+        (:out-ch p)  ([update]
+                        (enqueue ch update)))))))
+
+(start-tcp-server handler
+                  {:port 10000, :frame (gloss/string :utf-8 :delimiters ["\r\n"])})
+
+(comment
+  (def ch-1
+    (wait-for-result
+     (tcp-client {:host "localhost",
+                  :port 10000,
+                  :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
+  (enqueue ch-1 "0")
+  (def ch-2
+    (wait-for-result
+     (tcp-client {:host "localhost",
+                  :port 10000,
+                  :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
+  (enqueue ch-2 "1")
+
+  (def ch-3
+    (wait-for-result
+     (tcp-client {:host "localhost",
+                  :port 10000,
+                  :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
+  (enqueue ch-3 "10")
+  ;;  (wait-for-message ch)
+
+  )
