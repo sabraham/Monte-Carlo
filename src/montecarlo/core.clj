@@ -16,6 +16,12 @@
   [board]
   (map :id (deref (:players board))))
 
+(defn id->player
+  [board id]
+  (->> board :players deref
+      (filter #(= id (:id %)))
+      first))
+
 (defn debug-board
   [board header]
   (println (str "\n"
@@ -107,12 +113,8 @@
 (extend-type Player
   ActionP
   (fold [this])
-  (call [this total-bet]
-    (dosync
-     (alter (:stack this) #(max 0 (- % total-bet)))))
-  (raise [this r total-bet]
-    (dosync
-     (alter (:stack this) #(max 0 (- % total-bet r))))))
+  (call [this total-bet])
+  (raise [this r total-bet]))
 
 (defn stage-end?
   [board]
@@ -339,30 +341,36 @@
        (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
        )))
   (call [this]
-    (let [player (first (deref (:play-order this)))
-          bet-amt (board->total-bet this)]
+    (let [player-id (first (deref (:play-order this)))
+          bet-amt (board->total-bet this)
+          delta (board->needed-bet this player-id)
+          player (id->player this player-id)]
       (if (pos? bet-amt)
         (let [new-bet (->Bet bet-amt
-                             #{player} #{player})]
+                             #{player-id} #{player-id})]
           (dosync
+           (alter (:stack player) #(- % delta))
            (alter (:bets this) update-bets new-bet)
            (alter (:play-order this) rest)
-           (alter (:remaining-players this) #(remove #{player} %))))
+           (alter (:remaining-players this) #(remove #{player-id} %))))
         (dosync
          (alter (:bets this) merge-bets)
          (alter (:play-order this) rest)
-         (alter (:remaining-players this) #(remove #{player} %))))))
+         (alter (:remaining-players this) #(remove #{player-id} %))))))
   (raise [this r]
-    (let [player (first (deref (:play-order this)))
+    (let [player-id (first (deref (:play-order this)))
           new-bet (->Bet (+ r (board->total-bet this))
-                         #{player}
-                         #{player})]
+                         #{player-id}
+                         #{player-id})
+          delta (board->needed-bet this player-id)
+          player (id->player this player-id)]
       (dosync
+       (alter (:stack player) #(- % (+ delta r)))
        (alter (:bets this) update-bets new-bet)
        (alter (:play-order this) rest)
        (alter (:remaining-players this)
               (fn [x]
-                (remove #{player} (board->player-ids this))))))))
+                (remove #{player-id} (board->player-ids this))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stages
@@ -463,14 +471,14 @@
      (tcp-client {:host "localhost",
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-2 "1")
+  (enqueue ch-2 "-1")
 
   (def ch-3
     (wait-for-result
      (tcp-client {:host "localhost",
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-3 "10")
+  (enqueue ch-3 "0")
   ;;  (wait-for-message ch)
 
   )
