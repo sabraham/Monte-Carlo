@@ -5,4 +5,4 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord Bet
-    [bet players original-players]) ;; player-ids
+    [bet players original-players n]) ;; player-ids

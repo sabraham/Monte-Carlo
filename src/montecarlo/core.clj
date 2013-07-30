@@ -38,7 +38,10 @@
 
 (defn split-bet
   [bet x player]
-  [(->Bet x (conj (:players bet) player) (conj (:original-players bet) player))
+  [(->Bet x
+          (conj (:players bet) player)
+          (conj (:original-players bet) player)
+          (inc (:n bet)))
    (update-in bet [:bet] #(- % x))])
 
 (defn call-bet
@@ -60,7 +63,8 @@
                  (conj (rest output)
                        (->Bet (+ (:bet bet-i) (:bet bet-o))
                               (:players bet-i)
-                              (:original-players bet-i))))
+                              (:original-players bet-i)
+                              (:n bet-i))))
           (recur (rest input)
                  (conj output
                        bet-i))))
@@ -80,7 +84,7 @@
          (> bet (:bet standing-bet)) (recur (rest bets)
                                             (- bet (:bet standing-bet))
                                             (conj ret (first (call-bet bets player)))))
-        (concat ret [(->Bet bet #{player} #{player})])))))
+        (concat ret [(->Bet bet #{player} #{player} 1)])))))
 
 (defn board->total-bet
   [board]
@@ -116,8 +120,10 @@
   (fold [this board] (>!! (:action-ch board) FOLD))
   (call [this board] (>!! (:action-ch board) CALL))
   (raise [this board r] (>!! (:action-ch board)
-                             (min (action->raise r)
-                                  (deref (:stack this))))))
+                             (max 0
+                                  (min r
+                                       (- (deref (:stack this))
+                                          (board->needed-bet board (:id this))))))))
 
 (defn stage-end?
   [board]
@@ -289,7 +295,7 @@
   (doseq [pot (deref pots)]
     (dosync
      (alter (:stack (first (filter #((:players pot) (:id %)) winners)))
-            #(+ (* (:bet pot) (count (:original-players pot))) %)))))
+            #(+ (* (:bet pot) (:n pot)) %)))))
 
 (defn end-game
   [board]
@@ -319,7 +325,7 @@
    (while true
      (alt!
       (:action-ch board)  ([action]
-                             (debug-board board "top")
+;;                             (debug-board board "top")
                              (board-action board action))
       (:quit-ch board)  ([s] (println "i don't know how to quit you."))))))
 
@@ -330,7 +336,8 @@
       (dosync
        (alter (:bets this) (fn [x] (merge-bets (map #(->Bet (:bet %)
                                                             (disj (:players %) player)
-                                                            (:original-players %))
+                                                            (:original-players %)
+                                                            (dec (:n %)))
                                                     x))))
        (alter (:remaining-players this) #(remove #{player} %))
        (alter (:play-order this) (fn [x] (filter #(not (= player %)) x)))
@@ -342,7 +349,7 @@
           player (id->player this player-id)]
       (if (pos? bet-amt)
         (let [new-bet (->Bet bet-amt
-                             #{player-id} #{player-id})]
+                             #{player-id} #{player-id} 1)]
           (if (= delta (deref (:stack player)))
             (dosync
              (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
@@ -363,13 +370,14 @@
     (let [player-id (first (deref (:play-order this)))
           new-bet (->Bet (+ r (board->total-bet this))
                          #{player-id}
-                         #{player-id})
+                         #{player-id}
+                         1)
           delta (board->needed-bet this player-id)
           player (id->player this player-id)]
       (if (= (+ delta r) (deref (:stack player)))
         (dosync
          (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
-         (alter (:stack player) #(constantly 0))
+         (alter (:stack player) (fn [x] 0))
          (alter (:bets this) update-bets new-bet)
          (alter (:play-order this) rest)
          (alter (:remaining-players this)
@@ -420,11 +428,11 @@
         [p1 p2] (take 2 (deref (:players board)))]
     (dosync
      (alter (:stack p1) #(- % small))
-     (alter (:bets board) update-bets (->Bet small #{(:id p1)} #{(:id p1)})))
+     (alter (:bets board) update-bets (->Bet small #{(:id p1)} #{(:id p1)} 1)))
     (dosync
      (alter (:play-order board) #(drop 2 %))
      (alter (:stack p2) #(- % big))
-     (alter (:bets board) update-bets (->Bet big #{(:id p2)} #{(:id p2)})))))
+     (alter (:bets board) update-bets (->Bet big #{(:id p2)} #{(:id p2)} 1)))))
 
 (defn game
   [players blinds a]
@@ -490,7 +498,7 @@
      (tcp-client {:host "localhost",
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-3 "10")
+  (enqueue ch-3 "100")
   ;;  (wait-for-message ch)
 
   )
