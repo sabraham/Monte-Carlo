@@ -110,11 +110,14 @@
      out-ch ;; logical player ->  real player
      quit-ch])
 
+;; Validation layer
 (extend-type Player
   ActionP
-  (fold [this])
-  (call [this total-bet])
-  (raise [this r total-bet]))
+  (fold [this board] (>!! (:action-ch board) FOLD))
+  (call [this board] (>!! (:action-ch board) CALL))
+  (raise [this board r] (>!! (:action-ch board)
+                             (min (action->raise r)
+                                  (deref (:stack this))))))
 
 (defn stage-end?
   [board]
@@ -135,17 +138,10 @@
     (do
       (let [action (<!! (:listen-ch player))]
         (cond
-         (is-fold? action) (fold player)
-         (is-call? action) (call player
-                                 (board->needed-bet board
-                                                    (:id player)))
-         (is-raise? action) (raise player
-                                   (action->raise action)
-                                   (board->needed-bet board (:id player)))
-         :else (throw (Exception. "Action is not fold nor call nor raise!")))
-        (>!! (:action-ch board) action)
-        ;; TODO here: send update to real player
-        ))))
+         (is-fold? action) (fold player board)
+         (is-call? action) (call player board)
+         (is-raise? action) (raise player board action)
+         :else (throw (Exception. "Action is not fold nor call nor raise!")))))))
 
 (defn public-player [player]
   {:id (:id player)
@@ -338,8 +334,7 @@
                                                     x))))
        (alter (:remaining-players this) #(remove #{player} %))
        (alter (:play-order this) (fn [x] (filter #(not (= player %)) x)))
-       (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
-       )))
+       (alter (:players this) (fn [x] (remove #(= player (:id %)) x))))))
   (call [this]
     (let [player-id (first (deref (:play-order this)))
           bet-amt (board->total-bet this)
@@ -466,6 +461,7 @@
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
   (enqueue ch-1 "0")
+  (wait-for-message ch-1)
   (def ch-2
     (wait-for-result
      (tcp-client {:host "localhost",
@@ -478,7 +474,7 @@
      (tcp-client {:host "localhost",
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-3 "0")
+  (enqueue ch-3 "10")
   ;;  (wait-for-message ch)
 
   )
