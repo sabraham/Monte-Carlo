@@ -19,8 +19,8 @@
 (defn id->player
   [board id]
   (->> board :players deref
-      (filter #(= id (:id %)))
-      first))
+       (filter #(= id (:id %)))
+       first))
 
 (defn debug-board
   [board header]
@@ -343,11 +343,18 @@
       (if (pos? bet-amt)
         (let [new-bet (->Bet bet-amt
                              #{player-id} #{player-id})]
-          (dosync
-           (alter (:stack player) #(- % delta))
-           (alter (:bets this) update-bets new-bet)
-           (alter (:play-order this) rest)
-           (alter (:remaining-players this) #(remove #{player-id} %))))
+          (if (= delta (deref (:stack player)))
+            (dosync
+             (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
+             (alter (:stack player) #(- % delta))
+             (alter (:bets this) update-bets new-bet)
+             (alter (:play-order this) rest)
+             (alter (:remaining-players this) #(remove #{player-id} %)))
+            (dosync
+             (alter (:stack player) #(- % delta))
+             (alter (:bets this) update-bets new-bet)
+             (alter (:play-order this) rest)
+             (alter (:remaining-players this) #(remove #{player-id} %)))))
         (dosync
          (alter (:bets this) merge-bets)
          (alter (:play-order this) rest)
@@ -359,13 +366,22 @@
                          #{player-id})
           delta (board->needed-bet this player-id)
           player (id->player this player-id)]
-      (dosync
-       (alter (:stack player) #(- % (+ delta r)))
-       (alter (:bets this) update-bets new-bet)
-       (alter (:play-order this) rest)
-       (alter (:remaining-players this)
-              (fn [x]
-                (remove #{player-id} (board->player-ids this))))))))
+      (if (= (+ delta r) (deref (:stack player)))
+        (dosync
+         (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
+         (alter (:stack player) #(constantly 0))
+         (alter (:bets this) update-bets new-bet)
+         (alter (:play-order this) rest)
+         (alter (:remaining-players this)
+                (fn [x]
+                  (remove #{player-id} (board->player-ids this)))))
+        (dosync
+         (alter (:stack player) #(- % (+ delta r)))
+         (alter (:bets this) update-bets new-bet)
+         (alter (:play-order this) rest)
+         (alter (:remaining-players this)
+                (fn [x]
+                  (remove #{player-id} (board->player-ids this)))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stages
