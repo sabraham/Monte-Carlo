@@ -1,7 +1,7 @@
 (ns montecarlo.core
   (require [clojure.core.async :as async
             :refer [<! >! <!! >!! timeout chan alt! alts!! go close!
-                    sliding-buffer]]
+                    sliding-buffer thread alt!!]]
            [montecarlo.card :as card]
            [montecarlo.hand-evaluator :as evaluator]
            [clojure.math.combinatorics :as combo]
@@ -171,8 +171,8 @@
                             (swap! (:hand player) conj card)
                             (>! (:out-ch player) (generate-string card)))
       (:board-ch player) ([board]
-                            (player-action player board)
-                            (>! (:out-ch player) (read-board board)))
+                            (>! (:out-ch player) (read-board board))
+                            (player-action player board))
       (:quit-ch player)  ([s] (println "i don't know how to quit you."))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -385,12 +385,15 @@
 
 (defn deal-hand
   [board]
-  (let [n (count (deref (:players board)))]
+  (let [n (count (deref (:players board)))
+        next-player-id (first (deref (:play-order board)))]
     (doseq [[p card]
             (map list
                  (cycle (deref (:players board)))
                  (take (* 2 n) (deref (:deck board))))]
-      (go (>! (:card-ch p) card)))
+      (if (= (:id p) next-player-id)
+        (>!! (:card-ch p) card)
+        (go (>! (:card-ch p) card))))
     (dosync
      (alter (:deck board) #(drop (* 2 n) %)))))
 
@@ -442,9 +445,9 @@
      (>! PLAYERS-WAITING p))
     (receive-all ch #(do (go (>! (:listen-ch p) (Integer/parseInt %)))
                          (println %)))
-    (go
+    (thread
      (while true
-       (alt!
+       (alt!!
         (:out-ch p)  ([update]
                         (enqueue ch update)))))))
 
