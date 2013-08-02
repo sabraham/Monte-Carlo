@@ -49,7 +49,8 @@
   (let [bet (first bets)]
     (conj (rest bets) (assoc bet
                         :players (conj (:players bet) player)
-                        :original-players (conj (:original-players bet) player)))))
+                        :original-players (conj (:original-players bet) player)
+                        :n (inc (:n bet))))))
 
 (defn merge-bets
   [bets]
@@ -338,7 +339,7 @@
        (alter (:bets this) (fn [x] (merge-bets (map #(->Bet (:bet %)
                                                             (disj (:players %) player)
                                                             (:original-players %)
-                                                            (dec (:n %)))
+                                                            (:n %))
                                                     x))))
        (alter (:remaining-players this) #(remove #{player} %))
        (alter (:play-order this) (fn [x] (filter #(not (= player %)) x)))
