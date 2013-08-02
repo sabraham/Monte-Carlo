@@ -1,7 +1,7 @@
 (ns montecarlo.core
   (require [clojure.core.async :as async
             :refer [<! >! <!! >!! timeout chan alt! alts!! go close!
-                    sliding-buffer thread alt!!]]
+                    sliding-buffer thread alt!! buffer]]
            [montecarlo.card :as card]
            [montecarlo.hand-evaluator :as evaluator]
            [clojure.math.combinatorics :as combo]
@@ -469,12 +469,30 @@
     (swap! players-atom conj p)))
 
 
-
-
 (go
  (while true
    (alt!
     PLAYERS-WAITING ([p] (players-waiting-fn p)))))
+
+(def DATABASE (atom {}))
+
+;; TODO race condition
+(defn create-new-room
+  [name num-players]
+  (let [q (chan (buffer num-players))]
+    (swap! DATABASE assoc name {:players (list)
+                                :n num-players
+                                :q q})
+    (go (while true
+          (alt! q ([p] (do
+                         (swap! DATABASE #(update-in % [name :players] conj p))
+                         (when (= (count (get-in @DATABASE [name :players])) num-players)
+                           (game (get-in @DATABASE [name :players])
+                                 {:small 5 :big 10})))))))))
+
+(defn join-room
+  [p room]
+  (go (>! (get-in @DATABASE [room :q]) p)))
 
 (defn handler
   [ch client-info]
@@ -482,11 +500,13 @@
                     (chan (sliding-buffer 1))
                     (chan) (chan) (chan) (chan))]
     (println "new connection")
-    (go
-     (>! PLAYERS-WAITING p))
     (receive-all ch #(let [req (parse-string %)]
-                      (go (>! (:listen-ch p) (get req "amt")))
-                         (println %)))
+                       (case (get req "type")
+                         "new_room" (create-new-room (get req "name") (get req "n"))
+                         "join_room" (join-room p (get req "name"));;(players-waiting-fn p) ;;     (go (>! PLAYERS-WAITING p))
+                         "play" (go (>! (:listen-ch p) (get req "amt")))
+                         (go (>! (:out-ch p) (generate-string {:error -1}))))
+                       (println %)))
     (go
      (while true
        (alt!
