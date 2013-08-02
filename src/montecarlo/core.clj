@@ -484,11 +484,12 @@
     (println "new connection")
     (go
      (>! PLAYERS-WAITING p))
-    (receive-all ch #(do (go (>! (:listen-ch p) (Integer/parseInt %)))
+    (receive-all ch #(let [req (parse-string %)]
+                      (go (>! (:listen-ch p) (get req "amt")))
                          (println %)))
-    (thread
+    (go
      (while true
-       (alt!!
+       (alt!
         (:out-ch p)  ([update]
                         (enqueue ch update)))))))
 
