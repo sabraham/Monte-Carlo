@@ -307,7 +307,8 @@
                                                (map #(hash-map :player %1 :hand-value %2)
                                                     (deref (:players board))
                                                     hand-values))))]
-    (update-stacks (:pots board) winners)))
+    (update-stacks (:pots board) winners)
+    (>!! (:quit-ch board) :quit)))
 
 (defn board-action
   [board action]
@@ -325,7 +326,7 @@
    (while true
      (alt!
       (:action-ch board)  ([action]
-;;                             (debug-board board "top")
+                             ;;                             (debug-board board "top")
                              (board-action board action))
       (:quit-ch board)  ([s] (println "i don't know how to quit you."))))))
 
@@ -437,24 +438,37 @@
      (alter (:stack p2) #(- % big))
      (alter (:bets board) update-bets (->Bet big #{(:id p2)} #{(:id p2)} 1)))))
 
-(defn game
-  [players blinds a]
-  (let [board (init-board players blinds a)]
-    (play-blinds board)
-    (doseq [p players] (run p))
-    (run-board board)
-    (deal-hand board)
-    (update-players board)))
+(defn hand
+  [board players]
+  (play-blinds board)
+  (doseq [p players] (run p))
+  (run-board board)
+  (deal-hand board)
+  (update-players board))
+
 
 
 (def GLOBAL-ACTION-CH (chan (sliding-buffer 3)))
+
+(defn game
+  [players blinds]
+  (let [action-ch GLOBAL-ACTION-CH]
+    (loop [players players]
+      (let [board (init-board players blinds action-ch)]
+        (hand board players)
+        (<!! (:quit-ch board))
+        (recur (concat (rest players) (list (first players))))))))
+
 (def PLAYERS-WAITING (chan))
 (def players-atom (atom []))
 (defn players-waiting-fn
   [p]
   (if (= (count @players-atom) 2)
-    (game (conj @players-atom p) {:small 5 :big 10} GLOBAL-ACTION-CH)
+    (game (conj @players-atom p) {:small 5 :big 10}; GLOBAL-ACTION-CH
+          )
     (swap! players-atom conj p)))
+
+
 
 
 (go
