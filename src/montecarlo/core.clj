@@ -1,15 +1,14 @@
 (ns montecarlo.core
   (require [clojure.core.async :as async
             :refer [<! >! <!! >!! timeout chan alt! alts!! go close!
-                    sliding-buffer]]
+                    sliding-buffer thread alt!! buffer]]
            [montecarlo.card :as card]
            [montecarlo.hand-evaluator :as evaluator]
            [clojure.math.combinatorics :as combo]
            [montecarlo.bet :refer :all]
            [montecarlo.action :refer :all]
            [cheshire.core :refer :all]
-           [gloss.core :as gloss]
-           [gloss.io])
+           [gloss.core :as gloss])
   (use [lamina.core]
        [aleph.tcp]))
 
@@ -50,7 +49,8 @@
   (let [bet (first bets)]
     (conj (rest bets) (assoc bet
                         :players (conj (:players bet) player)
-                        :original-players (conj (:original-players bet) player)))))
+                        :original-players (conj (:original-players bet) player)
+                        :n (inc (:n bet))))))
 
 (defn merge-bets
   [bets]
@@ -176,8 +176,8 @@
                             (swap! (:hand player) conj card)
                             (>! (:out-ch player) (generate-string card)))
       (:board-ch player) ([board]
-                            (player-action player board)
-                            (>! (:out-ch player) (read-board board)))
+                            (>! (:out-ch player) (read-board board))
+                            (player-action player board))
       (:quit-ch player)  ([s] (println "i don't know how to quit you."))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -338,7 +338,7 @@
        (alter (:bets this) (fn [x] (merge-bets (map #(->Bet (:bet %)
                                                             (disj (:players %) player)
                                                             (:original-players %)
-                                                            (dec (:n %)))
+                                                            (:n %))
                                                     x))))
        (alter (:remaining-players this) #(remove #{player} %))
        (alter (:play-order this) (fn [x] (filter #(not (= player %)) x)))
@@ -413,12 +413,15 @@
 
 (defn deal-hand
   [board]
-  (let [n (count (deref (:players board)))]
+  (let [n (count (deref (:players board)))
+        next-player-id (first (deref (:play-order board)))]
     (doseq [[p card]
             (map list
                  (cycle (deref (:players board)))
                  (take (* 2 n) (deref (:deck board))))]
-      (go (>! (:card-ch p) card)))
+      (if (= (:id p) next-player-id)
+        (>!! (:card-ch p) card)
+        (go (>! (:card-ch p) card))))
     (dosync
      (alter (:deck board) #(drop (* 2 n) %)))))
 
@@ -443,28 +446,53 @@
   (deal-hand board)
   (update-players board))
 
+
+
+(def GLOBAL-ACTION-CH (chan (sliding-buffer 3)))
+
 (defn game
   [players blinds]
-  (let [action-ch (chan (sliding-buffer (count players)))]
+  (let [action-ch GLOBAL-ACTION-CH]
     (loop [players players]
       (let [board (init-board players blinds action-ch)]
         (hand board players)
         (<!! (:quit-ch board))
         (recur (concat (rest players) (list (first players))))))))
 
+(def PLAYERS-WAITING (chan))
+(def players-atom (atom []))
+(defn players-waiting-fn
+  [p]
+  (if (= (count @players-atom) 2)
+    (game (conj @players-atom p) {:small 5 :big 10}; GLOBAL-ACTION-CH
+          )
+    (swap! players-atom conj p)))
+
+
+(go
+ (while true
+   (alt!
+    PLAYERS-WAITING ([p] (players-waiting-fn p)))))
+
 (def DATABASE (atom {}))
 
+;; TODO race condition
 (defn create-new-room
   [name num-players]
-  (swap! DATABASE assoc name {:players (list)
-                              :n num-players}))
+  (let [q (chan (buffer num-players))]
+    (swap! DATABASE assoc name {:players (list)
+                                :n num-players
+                                :q q})
+    (go (while true
+          (alt! q ([p] (do
+                         (swap! DATABASE #(update-in % [name :players] conj p))
+                         (when (= (count (get-in @DATABASE [name :players])) num-players)
+                           (game (get-in @DATABASE [name :players])
+                                 {:small 5 :big 10})))))))))
 
 (defn join-room
   [p room]
-  (swap! DATABASE #(update-in % [room :players] conj p))
-  (let [meta (get @DATABASE room)]
-    (when (= (:n meta) (count (:players meta)))
-      (game (conj (:players meta) p) {:small 5 :big 10}))))
+  (go (>! (get-in @DATABASE [room :q]) p)))
 
 (defn handler
   [ch client-info]
@@ -472,52 +500,43 @@
                     (chan (sliding-buffer 1))
                     (chan) (chan) (chan) (chan))]
     (println "new connection")
+    (receive-all ch #(let [req (parse-string %)]
+                       (case (get req "type")
+                         "new_room" (create-new-room (get req "name") (get req "n"))
+                         "join_room" (join-room p (get req "name"));;(players-waiting-fn p) ;;     (go (>! PLAYERS-WAITING p))
+                         "play" (go (>! (:listen-ch p) (get req "amt")))
+                         (go (>! (:out-ch p) (generate-string {:error -1}))))
+                       (println %)))
     (go
      (while true
        (alt!
-        (:out-ch p) ([update]
-                       (enqueue ch update)))))
-    (receive-all ch #(let [req (parse-string %)]
-                       (println req)
-                       (case (get req "type")
-                         "action" (go (>! (:listen-ch p) (get req "command")))
-                         "new_room" (create-new-room (keyword (get req "name"))
-                                                     (get req "n"))
-                         "join_room" (join-room p (keyword (get req "name")))
-                         (go (>! (:out-ch p) (generate-string {:msg "error"}))))))))
+        (:out-ch p)  ([update]
+                        (enqueue ch update)))))))
 
 (start-tcp-server handler
-                  {:port 10000 :frame (gloss/string :utf-8 :delimeters ["\r\n"])})
+                  {:port 10000, :frame (gloss/string :utf-8 :delimiters ["\r\n"])})
 
 (comment
-;; {"type": "new_room", "name": "default", "n": 2}
-;; {"type": "join_room", "name": "default"}
   (def ch-1
     (wait-for-result
      (tcp-client {:host "localhost",
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-
-  (enqueue ch-1 "{\"type\": \"new_room\", \"name\": \"puerco\", \"n\": 3}")
-  (enqueue ch-1 "{\"type\": \"join_room\", \"name\": \"puerco\"}")
-
-  (enqueue ch-1 "{\"type\": \"join_room\", \"name\": \"default\"}")
-
+  (enqueue ch-1 "0")
   (wait-for-message ch-1)
   (def ch-2
     (wait-for-result
      (tcp-client {:host "localhost",
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-2 "{\"type\": \"join_room\", \"name\": \"puerco\"}")
+  (enqueue ch-2 "-1")
 
   (def ch-3
     (wait-for-result
      (tcp-client {:host "localhost",
                   :port 10000,
                   :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-3 "{\"type\": \"join_room\", \"name\": \"puerco\"}")
-  (enqueue ch-3 "{\"type\": \"action\", \"command\": 10 }")
+  (enqueue ch-3 "100")
   ;;  (wait-for-message ch)
 
   )
