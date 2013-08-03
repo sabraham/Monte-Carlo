@@ -1,5 +1,4 @@
 (ns montecarlo.hand-evaluator
-  ;;  (import pokerai.game.eval.spears2p2.StateTableEvaluator)
   (require [montecarlo.card :as card]
            [clojure.math.combinatorics :as combo]))
 
