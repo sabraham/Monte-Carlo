@@ -165,7 +165,7 @@
                        :players (map public-player (deref (:players board))))
         ]
     (println public-board)
-    (generate-string public-board)))
+    public-board))
 
 (defn run
   [player]
@@ -174,7 +174,7 @@
      (alt!
       (:card-ch player)  ([card]
                             (swap! (:hand player) conj card)
-                            (>! (:out-ch player) (generate-string card)))
+                            (>! (:out-ch player) card))
       (:board-ch player) ([board]
                             (>! (:out-ch player) (read-board board))
                             (player-action player board))
@@ -467,11 +467,11 @@
 
 (defn error-msg
   [p status-code msg]
-  (go (>! (:out-ch p) (generate-string {:status status-code :msg msg}))))
+  (go (>! (:out-ch p) {:status status-code :msg msg})))
 
 (defn ok-msg
   [p]
-  (go (>! (:out-ch p) (generate-string {:status 0 :msg "OK"}))))
+  (go (>! (:out-ch p) {:status 0 :msg "OK"})))
 
 (defn pos-int?
   [x]
@@ -554,7 +554,7 @@
      (while true
        (alt!
         (:out-ch p)  ([update]
-                        (enqueue ch update)))))))
+                        (enqueue ch (generate-string update))))))))
 
 (start-tcp-server handler
                   {:port 10000, :frame (gloss/string :utf-8 :delimiters ["\r\n"])})
