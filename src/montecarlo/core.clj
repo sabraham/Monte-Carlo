@@ -454,33 +454,14 @@
   (deal-hand board)
   (update-players board))
 
-
-
-(def GLOBAL-ACTION-CH (chan (sliding-buffer 3)))
-
 (defn game
   [players blinds]
-  (let [action-ch GLOBAL-ACTION-CH]
+  (let [action-ch (chan (sliding-buffer (count players)))]
     (loop [players players]
       (let [board (init-board players blinds action-ch)]
         (hand board players)
         (<!! (:quit-ch board))
         (recur (concat (rest players) (list (first players))))))))
-
-(def PLAYERS-WAITING (chan))
-(def players-atom (atom []))
-(defn players-waiting-fn
-  [p]
-  (if (= (count @players-atom) 2)
-    (game (conj @players-atom p) {:small 5 :big 10}; GLOBAL-ACTION-CH
-          )
-    (swap! players-atom conj p)))
-
-
-(go
- (while true
-   (alt!
-    PLAYERS-WAITING ([p] (players-waiting-fn p)))))
 
 (def DATABASE (atom {}))
 
