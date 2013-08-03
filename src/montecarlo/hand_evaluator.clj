@@ -131,3 +131,40 @@
                   (if-let [hit (pair? cards)]
                     (ret 1 cards hit)
                     (ret 0 (list) cards)))))))))))
+
+
+(defn comparable-hand-values
+  [val-a val-b]
+  (loop [l val-a
+         r val-b
+         l-stack (list)
+         r-stack (list)]
+    (if (> (count l) (count r))
+      1
+      (if (< (count l) (count r))
+        -1
+        (if (empty? l)
+          (if (empty? l-stack)
+            0
+            (recur (first l-stack) (first r-stack) (rest l-stack) (rest r-stack)))
+          (let [[x & xs] l
+                [y & ys] r]
+            (if (coll? x)
+              (recur x y (conj l-stack x) (conj r-stack y))
+              (let [c (compare x y)]
+                (if (= c 0)
+                  (recur xs ys l-stack r-stack)
+                  c)))))))))
+
+(defn compare-hand-values
+  [val-a val-b]
+  (if (neg? (comparable-hand-values val-a val-b))
+    val-b
+    val-a))
+
+(defn player->hand-value
+  [board player]
+  (let [pocket (:hand player)
+        available-cards (concat (deref (:community-cards board)) @pocket)
+        hands (combo/combinations available-cards 5)]
+    (reduce compare-hand-values (map evaluator hands))))
