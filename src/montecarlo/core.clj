@@ -156,7 +156,7 @@
 
 (defn read-board
   [board]
-  (let [ks [:community-cards :bets :pots :remaining-players :play-order]
+  (let [ks [:community-cards :bets :pots :remaining-players :play-order :time]
         public-board (zipmap ks (map #(deref (get board %)) ks))
         public-board (assoc public-board
                        :play-order (take (count (deref (:players board)))
@@ -194,6 +194,7 @@
      blinds ;; blinds
      stage  ;; stage 0 - preflop, 1 - flop, 2 - turn, 3 - river
      deck ;;
+     time ;; time frame
      action-ch ;; action-ch
      quit-ch ;;
      ])
@@ -335,6 +336,7 @@
   (fold [this]
     (let [player (first (deref (:play-order this)))]
       (dosync
+       (alter (:time this) inc)
        (alter (:bets this) (fn [x] (merge-bets (map #(->Bet (:bet %)
                                                             (disj (:players %) player)
                                                             (:original-players %)
@@ -353,17 +355,20 @@
                              #{player-id} #{player-id} 1)]
           (if (= delta (deref (:stack player)))
             (dosync
+             (alter (:time this) inc)
              (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
              (alter (:stack player) #(- % delta))
              (alter (:bets this) update-bets new-bet)
              (alter (:play-order this) rest)
              (alter (:remaining-players this) #(remove #{player-id} %)))
             (dosync
+             (alter (:time this) inc)
              (alter (:stack player) #(- % delta))
              (alter (:bets this) update-bets new-bet)
              (alter (:play-order this) rest)
              (alter (:remaining-players this) #(remove #{player-id} %)))))
         (dosync
+         (alter (:time this) inc)
          (alter (:bets this) merge-bets)
          (alter (:play-order this) rest)
          (alter (:remaining-players this) #(remove #{player-id} %))))))
@@ -377,6 +382,7 @@
           player (id->player this player-id)]
       (if (= (+ delta r) (deref (:stack player)))
         (dosync
+         (alter (:time this) inc)
          (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
          (alter (:stack player) (fn [x] 0))
          (alter (:bets this) update-bets new-bet)
@@ -385,6 +391,7 @@
                 (fn [x]
                   (remove #{player-id} (board->player-ids this)))))
         (dosync
+         (alter (:time this) inc)
          (alter (:stack player) #(- % (+ delta r)))
          (alter (:bets this) update-bets new-bet)
          (alter (:play-order this) rest)
@@ -405,10 +412,11 @@
         play-order (ref (cycle (map :id players)))
         stage (ref 0)
         deck (ref (shuffle card/COMPLETE-DECK))
+        time (ref 0)
         players (ref players)
         quit-ch (chan)]
     (->Board community-cards bets pots
-             remaining-players play-order players blinds stage deck
+             remaining-players play-order players blinds stage deck time
              action-ch quit-ch)))
 
 (defn deal-hand
@@ -569,28 +577,3 @@
 
 (start-tcp-server handler
                   {:port 10000, :frame (gloss/string :utf-8 :delimiters ["\r\n"])})
-
-(comment
-  (def ch-1
-    (wait-for-result
-     (tcp-client {:host "localhost",
-                  :port 10000,
-                  :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-1 "0")
-  (wait-for-message ch-1)
-  (def ch-2
-    (wait-for-result
-     (tcp-client {:host "localhost",
-                  :port 10000,
-                  :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-2 "-1")
-
-  (def ch-3
-    (wait-for-result
-     (tcp-client {:host "localhost",
-                  :port 10000,
-                  :frame (gloss/string :utf-8 :delimiters ["\r\n"])})))
-  (enqueue ch-3 "100")
-  ;;  (wait-for-message ch)
-
-  )
