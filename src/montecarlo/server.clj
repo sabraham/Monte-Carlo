@@ -78,11 +78,11 @@
     (do
       (go (>! q p))
       (ok-msg p))
-    (error-msg -2 (str "Room \"" name "\" does not exist yet."))))
+    (error-msg p -2 (str "Room \"" name "\" does not exist yet."))))
 
 (defn handler
   [ch client-info]
-  (let [p (mc.player/->Player (gensym) (ref 100) (atom [])
+  (let [p (mc.player/->Player (gensym) (ref 100) (ref (list))
                     (chan (sliding-buffer 1))
                     (chan) (chan) (chan) (chan))]
     (println "new connection")
@@ -92,6 +92,7 @@
                            "new_room" (create-new-room p req)
                            "join_room" (join-room p req)
                            "play" (go (>! (:listen-ch p) (:amt req)))
+                           "hand?" (go (>! (:out-ch p) {:hand @(:hand p)}))
                            (error-msg p -1 "bad \"type\" argument")))
                        (catch com.fasterxml.jackson.core.JsonParseException e
                          (error-msg p -17 "You sent me bad json!"))))

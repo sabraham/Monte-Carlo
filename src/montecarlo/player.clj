@@ -43,12 +43,18 @@
          (is-raise? action) (raise player board action)
          :else (throw (Exception. "Action is not fold nor call nor raise!")))))))
 
+(defn sync-card
+  [p card]
+  (dosync
+   (alter (:hand p) conj card)))
+
 (defn run
   [player]
   (go
    (while true
      (alt!
       (:card-ch player)  ([card]
+                            (sync-card player card)
                             (>! (:out-ch player) card))
       (:board-ch player) ([board]
                             (>! (:out-ch player) (mc.helpers/read-board board))
