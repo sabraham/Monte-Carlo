@@ -2,6 +2,12 @@
 
 Palaces are for royalty. We're just common people with a bank account.
 
+This is very much still in development. API changes daily~
+
+## Purpose
+
+Hopefully a reasonably performant poker server that can be used to test AIs.
+
 ## Starting the server
 
 To run the poker server
@@ -61,7 +67,7 @@ amt | int | Action to play
 --- |  ---
 negative | `fold`
 0 | `call`
-positive | `raise`
+positive | `raise` by `amt`
 
 Example of calling:
 ```
