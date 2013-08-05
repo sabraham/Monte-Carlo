@@ -133,4 +133,5 @@
        (alter (:deck board) (fn [_] (shuffle mc.card/COMPLETE-DECK)))
        (alter (:time board) (fn [_] 0))
        (alter (:original-players board) (fn [_] next-players))
-       (alter (:players board) (fn [_] next-players))))))
+       (alter (:players board) (fn [_] next-players))))
+    (deal-hand board)))
