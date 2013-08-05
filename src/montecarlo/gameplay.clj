@@ -5,7 +5,8 @@
    [montecarlo.helpers :as mc.helpers]
    [montecarlo.bet :as mc.bet]
    [montecarlo.hand-evaluator :as mc.evaluator]
-   [montecarlo.card :as mc.card]))
+   [montecarlo.card :as mc.card]
+   [montecarlo.database :as mc.database]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Gameplay
@@ -68,8 +69,8 @@
                  (cycle (deref (:players board)))
                  (take (* 2 n) (deref (:deck board))))]
       (if (= (:id p) next-player-id)
-        (>!! (:card-ch p) card)
-        (go (>! (:card-ch p) card))))
+        (>!! (:card-ch p) {:card card :room (:room board)})
+        (go (>! (:card-ch p) {:card card :room (:room board)}))))
     (dosync
      (alter (:deck board) #(drop (* 2 n) %)))))
 
@@ -79,11 +80,11 @@
         {:keys [small big]} (:blinds board)
         [p1 p2] (take 2 (deref (:players board)))]
     (dosync
-     (alter (:stack p1) #(- % small))
+     (alter (mc.database/player-stack (:id p1)) #(- % small))
      (alter (:bets board) mc.bet/update-bets (mc.bet/->Bet small #{(:id p1)} #{(:id p1)} 1)))
     (dosync
      (alter (:play-order board) #(drop 2 %))
-     (alter (:stack p2) #(- % big))
+     (alter (mc.database/player-stack (:id p2)) #(- % big))
      (alter (:bets board) mc.bet/update-bets (mc.bet/->Bet big #{(:id p2)} #{(:id p2)} 1)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -104,7 +105,7 @@
   [pots winners]
   (doseq [pot (deref pots)]
     (dosync
-     (alter (:stack (first (filter #((:players pot) (:id %)) winners)))
+     (alter (mc.database/player-stack (:id (first (filter #((:players pot) (:id %)) winners))))
             #(+ (* (:bet pot) (:n pot)) %)))))
 
 (defn end-game

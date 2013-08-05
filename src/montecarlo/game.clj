@@ -2,6 +2,7 @@
   (require [montecarlo.gameplay :as mc.gameplay]
            [montecarlo.player :as mc.player]
            [montecarlo.board :as mc.board]
+           [montecarlo.database :as mc.database]
            [clojure.core.async :as async
             :refer [<!! chan sliding-buffer]]))
 (defn hand
@@ -13,10 +14,12 @@
   (mc.board/update-players board))
 
 (defn game
-  [players blinds]
+  [name players blinds]
   (let [action-ch (chan (sliding-buffer (count players)))]
     (loop [players players]
-      (let [board (mc.board/init-board players blinds action-ch)]
+      (let [board (mc.board/init-board name players blinds action-ch)]
         (hand board players)
-        (<!! (:quit-ch board))
-        (recur (concat (rest players) (list (first players))))))))
+        (let [signal (<!! (:quit-ch board))]
+          (doseq [p-id (map :id (deref (:original-players board)))]
+            (mc.database/reset-hand p-id (:room board))))
+        (recur players)))))

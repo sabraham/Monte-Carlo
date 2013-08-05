@@ -3,13 +3,17 @@
             :refer [<! >! <!! >!! timeout chan alt! alts!! go close! sliding-buffer]])
   (:use clojure.test
         montecarlo.core
-        montecarlo.bet))
+        montecarlo.bet
+        montecarlo.player
+        montecarlo.board
+        montecarlo.gameplay))
 
 (defn player-gen
   []
   (let [action-chan (chan (sliding-buffer 3))]
-    (map #(->Player % (ref (* % 100)) (atom [])
-                    (chan (sliding-buffer 1)) action-chan
+    (map #(->Player % (ref (* % 100)) (ref [])
+                    (chan (sliding-buffer 1))
+                    (chan)
                     (chan) (chan) (chan))
          (rest (range)))))
 
@@ -464,13 +468,13 @@
     (def l1 (:listen-ch p1))
     (def l2 (:listen-ch p2))
     (def l3 (:listen-ch p3))
-    ;; (game [p1 p2 p3] {:small 5 :big 17} (:action-ch p1))
-    (def board (init-board [p1 p2 p3] {:small 5 :big 10} (:action-ch p1)))
-   (play-blinds board)
-   (run-board board)
-   (doseq [p [p1 p2 p3]] (run p))
-   (deal-hand board)
-    (update-players board)
+    (future (montecarlo.game/game [p1 p2 p3] {:small 5 :big 17}))
+   ;;  (def board (init-board [p1 p2 p3] {:small 5 :big 10} (:action-ch p1)))
+   ;; (play-blinds board)
+   ;; (run-board board)
+   ;; (doseq [p [p1 p2 p3]] (run p))
+   ;; (deal-hand board)
+   ;;  (update-players board)
     (>!! l3 0)
     (>!! l1 10)
     (>!! l2 -1)

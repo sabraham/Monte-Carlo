@@ -1,4 +1,6 @@
-(ns montecarlo.helpers)
+(ns montecarlo.helpers
+  (require
+   [montecarlo.database :as mc.database]))
 
 (defn id->player
   [board id]
@@ -26,7 +28,7 @@
 
 (defn public-player [player]
   {:id (:id player)
-   :stack (deref (:stack player))})
+   :stack (deref (mc.database/player-stack (:id player)))})
 
 (defn read-board
   [board]

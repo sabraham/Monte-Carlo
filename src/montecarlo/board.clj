@@ -4,6 +4,7 @@
            [montecarlo.card :as mc.card]
            [montecarlo.helpers :as mc.helpers]
            [montecarlo.gameplay :as mc.gameplay]
+           [montecarlo.database :as mc.database]
            [clojure.core.async :as async
             :refer [go alt! chan]]))
 
@@ -12,7 +13,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord Board
-    [community-cards
+    [room
+     community-cards
      bets    ;; list of Bet
      pots    ;; list of Pot
      remaining-players ;; players who have not yet played
@@ -22,6 +24,7 @@
      stage  ;; stage 0 - preflop, 1 - flop, 2 - turn, 3 - river
      deck ;;
      time ;; time frame
+     original-players
      action-ch ;; action-ch
      quit-ch])
 
@@ -32,10 +35,10 @@
       (dosync
        (alter (:time this) inc)
        (alter (:bets this) (fn [x] (mc.bet/merge-bets (map #(mc.bet/->Bet (:bet %)
-                                                            (disj (:players %) player)
-                                                            (:original-players %)
-                                                            (:n %))
-                                                    x))))
+                                                                          (disj (:players %) player)
+                                                                          (:original-players %)
+                                                                          (:n %))
+                                                           x))))
        (alter (:remaining-players this) #(remove #{player} %))
        (alter (:play-order this) (fn [x] (filter #(not (= player %)) x)))
        (alter (:players this) (fn [x] (remove #(= player (:id %)) x))))))
@@ -46,18 +49,18 @@
           player (mc.helpers/id->player this player-id)]
       (if (pos? bet-amt)
         (let [new-bet (mc.bet/->Bet bet-amt
-                             #{player-id} #{player-id} 1)]
-          (if (= delta (deref (:stack player)))
+                                    #{player-id} #{player-id} 1)]
+          (if (= delta @(mc.database/player-stack (:id player)))
             (dosync
              (alter (:time this) inc)
              (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
-             (alter (:stack player) #(- % delta))
+             (alter (mc.database/player-stack (:id player)) #(- % delta))
              (alter (:bets this) mc.bet/update-bets new-bet)
              (alter (:play-order this) rest)
              (alter (:remaining-players this) #(remove #{player-id} %)))
             (dosync
              (alter (:time this) inc)
-             (alter (:stack player) #(- % delta))
+             (alter (mc.database/player-stack (:id player)) #(- % delta))
              (alter (:bets this) mc.bet/update-bets new-bet)
              (alter (:play-order this) rest)
              (alter (:remaining-players this) #(remove #{player-id} %)))))
@@ -69,16 +72,16 @@
   (raise [this r]
     (let [player-id (first (deref (:play-order this)))
           new-bet (mc.bet/->Bet (+ r (mc.helpers/board->total-bet this))
-                         #{player-id}
-                         #{player-id}
-                         1)
+                                #{player-id}
+                                #{player-id}
+                                1)
           delta (mc.helpers/board->needed-bet this player-id)
           player (mc.helpers/id->player this player-id)]
-      (if (= (+ delta r) (deref (:stack player)))
+      (if (= (+ delta r) (deref (mc.database/player-stack (:id player))))
         (dosync
          (alter (:time this) inc)
          (alter (:players this) (fn [x] (remove #(= player (:id %)) x)))
-         (alter (:stack player) (fn [x] 0))
+         (alter (mc.database/player-stack (:id player)) (fn [x] 0))
          (alter (:bets this) mc.bet/update-bets new-bet)
          (alter (:play-order this) rest)
          (alter (:remaining-players this)
@@ -86,7 +89,7 @@
                   (remove #{player-id} (mc.helpers/board->player-ids this)))))
         (dosync
          (alter (:time this) inc)
-         (alter (:stack player) #(- % (+ delta r)))
+         (alter (mc.database/player-stack (:id player)) #(- % (+ delta r)))
          (alter (:bets this) mc.bet/update-bets new-bet)
          (alter (:play-order this) rest)
          (alter (:remaining-players this)
@@ -136,7 +139,7 @@
       (:quit-ch board)  ([s] (println "i don't know how to quit you."))))))
 
 (defn init-board
-  [players blinds action-ch]
+  [name players blinds action-ch]
   (let [community-cards (ref (list))
         bets (ref (list))
         pots (ref (list))
@@ -145,8 +148,11 @@
         stage (ref 0)
         deck (ref (shuffle mc.card/COMPLETE-DECK))
         time (ref 0)
+        original-players (ref players)
         players (ref players)
         quit-ch (chan)]
-    (->Board community-cards bets pots
+    (->Board name
+             community-cards bets pots
              remaining-players play-order players blinds stage deck time
+             original-players
              action-ch quit-ch)))

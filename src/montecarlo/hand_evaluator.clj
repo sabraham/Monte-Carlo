@@ -1,6 +1,7 @@
 (ns montecarlo.hand-evaluator
   (require [montecarlo.card :as card]
-           [clojure.math.combinatorics :as combo]))
+           [clojure.math.combinatorics :as combo]
+           [montecarlo.database :as mc.database]))
 
 (defn constant-coll?
   [coll]
@@ -163,7 +164,12 @@
 
 (defn player->hand-value
   [board player]
-  (let [pocket (:hand player)
-        available-cards (concat (deref (:community-cards board)) @pocket)
+  (println (str "\n"
+                "player ID: " (:id player) "\n"
+                "board name: " (:room board) "\n"
+                "player-hand: " (mc.database/player-hand (:id player) (:room board))
+                "\n"))
+  (let [pocket @(mc.database/player-hand (:id player) (:room board))
+        available-cards (concat (deref (:community-cards board)) pocket)
         hands (combo/combinations available-cards 5)]
     (reduce compare-hand-values (map evaluator hands))))
