@@ -98,6 +98,10 @@
                                              room)}))
     (error-msg p-id -1 (str "Player is not in room " room))))
 
+(defn whoami-query
+  [p-id]
+  (go (>! (mc.database/out-ch p-id) p-id)))
+
 (defn handler
   [ch client-info]
   (let [p (mc.player/->Player (gensym)
@@ -112,6 +116,7 @@
                            "join_room" (join-room p req)
                            "play" (go (>! (mc.database/listen-ch p-id (:name req)) (:amt req)))
                            "hand?" (hand-query p-id (:name req))
+                           "whoami?" (whoami-query p-id)
                            (error-msg p -1 "bad \"type\" argument")))
                        (catch com.fasterxml.jackson.core.JsonParseException e
                          (error-msg p -17 "You sent me bad json!"))))
