@@ -124,10 +124,9 @@
   (do-action action board)
   (if (mc.gameplay/game-end? board)
     (mc.gameplay/end-game board)
-    (do
-      (when (mc.gameplay/stage-end? board)
-        (mc.gameplay/stage-transition board))
-      (update-players board))))
+    (when (mc.gameplay/stage-end? board)
+      (mc.gameplay/stage-transition board)))
+  (update-players board))
 
 (defn run-board
   [board]

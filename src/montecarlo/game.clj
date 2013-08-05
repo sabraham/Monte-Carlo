@@ -15,11 +15,6 @@
 
 (defn game
   [name players blinds]
-  (let [action-ch (chan (sliding-buffer (count players)))]
-    (loop [players players]
-      (let [board (mc.board/init-board name players blinds action-ch)]
-        (hand board players)
-        (let [signal (<!! (:quit-ch board))]
-          (doseq [p-id (map :id (deref (:original-players board)))]
-            (mc.database/reset-hand p-id (:room board))))
-        (recur players)))))
+  (let [action-ch (chan (sliding-buffer (count players)))
+        board (mc.board/init-board name players blinds action-ch)]
+    (hand board players)))

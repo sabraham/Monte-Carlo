@@ -119,4 +119,18 @@
                                                     (deref (:players board))
                                                     hand-values))))]
     (update-stacks (:pots board) winners)
-    (>!! (:quit-ch board) :quit)))
+    (doseq [p-id (map :id (deref (:original-players board)))]
+      (mc.database/reset-hand p-id (:room board)))
+    (let [next-players (take (count (deref (:original-players board)))
+                             (rest (cycle (deref (:original-players board)))))]
+      (dosync
+       (alter (:community-cards board) (fn [_] (list)))
+       (alter (:bets board) (fn [_] (list)))
+       (alter (:pots board) (fn [_] (list)))
+       (alter (:remaining-players board) (fn [_] (map :id next-players)))
+       (alter (:play-order board) (fn [_] (cycle (map :id next-players))))
+       (alter (:stage board) (fn [_] 0))
+       (alter (:deck board) (fn [_] (shuffle mc.card/COMPLETE-DECK)))
+       (alter (:time board) (fn [_] 0))
+       (alter (:original-players board) (fn [_] next-players))
+       (alter (:players board) (fn [_] next-players))))))
