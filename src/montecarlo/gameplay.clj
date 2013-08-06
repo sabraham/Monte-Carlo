@@ -134,4 +134,5 @@
        (alter (:time board) (fn [_] 0))
        (alter (:original-players board) (fn [_] next-players))
        (alter (:players board) (fn [_] next-players))))
+    (play-blinds board)
     (deal-hand board)))
