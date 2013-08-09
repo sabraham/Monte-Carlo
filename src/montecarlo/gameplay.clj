@@ -104,20 +104,32 @@
 (defn update-stacks
   [pots winners]
   (doseq [pot (deref pots)]
-    (dosync
-     (alter (mc.database/player-stack (:id (first (filter #((:players pot) (:id %)) winners))))
-            #(+ (* (:bet pot) (:n pot)) %)))))
+    (let [pot-intersections (map clojure.set/intersection
+                                 (repeat (:players pot))
+                                 winners)
+          pot-winners (first (filter #(not (empty? %)) pot-intersections))
+          total-pot (* (:bet pot) (:n pot))
+          pot-share (int (/ total-pot (count pot-winners)))]
+      (dosync
+       (doseq [p pot-winners]
+         (alter (mc.database/player-stack p)
+                #(+ pot-share %)))))))
+
+(defn group-winners
+  [input]
+  (map #(apply hash-set %) (map #(map :player %) (partition-by :hand-value input))))
 
 (defn end-game
   [board]
   (dosync
    (alter (:pots board) concat (deref (:bets board)))
    (alter (:bets board) (fn [_] (list))))
-  (let [hand-values (map #(mc.evaluator/player->hand-value board %) (deref (:players board)))
-        winners (reverse (map :player (sort-by :hand-value mc.evaluator/comparable-hand-values
-                                               (map #(hash-map :player %1 :hand-value %2)
-                                                    (deref (:players board))
-                                                    hand-values))))]
+  (let [player-ids (map :id (deref (:players board)))
+        hand-values (map #(mc.evaluator/player->hand-value board %) player-ids)
+        winners (group-winners (reverse (sort-by :hand-value
+                                                 (map #(hash-map :player %1 :hand-value %2)
+                                                      player-ids
+                                                      hand-values))))]
     (update-stacks (:pots board) winners)
     (doseq [p-id (map :id (deref (:original-players board)))]
       (mc.database/reset-hand p-id (:room board)))

@@ -88,7 +88,7 @@
                        (card/->Card :d 2)
                        (card/->Card :s 8)
                        (card/->Card :c 5)
-                       (card/->Card :h 5)])))
+                       (card/->Card :s 5)])))
     (is (= [3 [5 5 5] [3 2]]
            (evaluator [(card/->Card :h 5)
                        (card/->Card :d 2)

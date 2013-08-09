@@ -95,7 +95,7 @@
 
 (defn cards->ranks
   [cards]
-  (sort > (map :rank cards)))
+  (vec (sort > (map :rank cards))))
 
 (defn ret
   [value cards hit]
@@ -103,7 +103,7 @@
 
 (defn ret-full-house
   [cards hit]
-  [6 (map :rank (flatten hit)) (list)])
+  [6 (map :rank (flatten hit)) []])
 
 (defn ret-two-pair
   [cards hit]
@@ -115,61 +115,58 @@
         is-flush (flush? cards)
         ranks (cards->ranks cards)]
     (if (and is-straight is-flush)
-      [8 ranks (list)]
+      [8 ranks []]
       (if-let [hit (four-of-a-kind? cards)]
         (ret 7 cards hit)
         (if-let [hit (full-house? cards)]
           (ret-full-house cards hit)
           (if is-flush
-            [5 ranks (list)]
+            [5 ranks []]
             (if is-straight
-              [4 ranks (list)]
+              [4 ranks []]
               (if-let [hit (three-of-a-kind? cards)]
                 (ret 3 cards hit)
                 (if-let [hit (two-pair? cards)]
                   (ret-two-pair cards hit)
                   (if-let [hit (pair? cards)]
                     (ret 1 cards hit)
-                    (ret 0 (list) cards)))))))))))
+                    (ret 0 [] cards)))))))))))
 
 
-(defn comparable-hand-values
+(comment
+  (defn comparable-hand-values
+    [val-a val-b]
+    (loop [l val-a
+           r val-b
+           l-stack []
+           r-stack []]
+      (if (empty? l)
+        (if (empty? l-stack)
+          0
+          (recur (first l-stack) (first r-stack) (rest l-stack) (rest r-stack)))
+        (let [[x & xs] l
+              [y & ys] r]
+          (if (coll? x)
+            (recur x y (conj l-stack x) (conj r-stack y))
+            (let [c (compare x y)]
+              (if (= c 0)
+                (recur xs ys l-stack r-stack)
+                c))))))))
+
+(defn max-hand-value
   [val-a val-b]
-  (loop [l val-a
-         r val-b
-         l-stack (list)
-         r-stack (list)]
-    (if (> (count l) (count r))
-      1
-      (if (< (count l) (count r))
-        -1
-        (if (empty? l)
-          (if (empty? l-stack)
-            0
-            (recur (first l-stack) (first r-stack) (rest l-stack) (rest r-stack)))
-          (let [[x & xs] l
-                [y & ys] r]
-            (if (coll? x)
-              (recur x y (conj l-stack x) (conj r-stack y))
-              (let [c (compare x y)]
-                (if (= c 0)
-                  (recur xs ys l-stack r-stack)
-                  c)))))))))
-
-(defn compare-hand-values
-  [val-a val-b]
-  (if (neg? (comparable-hand-values val-a val-b))
-    val-b
-    val-a))
+  (if (pos? (compare val-a val-b))
+    val-a
+    val-b))
 
 (defn player->hand-value
-  [board player]
+  [board player-id]
   (println (str "\n"
-                "player ID: " (:id player) "\n"
+                "player ID: " player-id "\n"
                 "board name: " (:room board) "\n"
-                "player-hand: " (mc.database/player-hand (:id player) (:room board))
+                "player-hand: " (mc.database/player-hand player-id (:room board))
                 "\n"))
-  (let [pocket @(mc.database/player-hand (:id player) (:room board))
+  (let [pocket @(mc.database/player-hand player-id (:room board))
         available-cards (concat (deref (:community-cards board)) pocket)
         hands (combo/combinations available-cards 5)]
-    (reduce compare-hand-values (map evaluator hands))))
+    (reduce max-hand-value (map evaluator hands))))
