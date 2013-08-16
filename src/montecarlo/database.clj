@@ -33,13 +33,19 @@
                                          :rooms (ref {})})))
 
 (defn add-room
-  [p room]
+  [p-id room]
   (dosync
-   (alter (:rooms (get @PLAYER-DATABASE p))
+   (alter (:rooms (get @PLAYER-DATABASE p-id))
           assoc
           room
           {:hand (ref (list))
            :listen-ch (chan (sliding-buffer 1))})))
+
+(defn in-room?
+  [p-id room]
+  (let [player-data (get @PLAYER-DATABASE p-id)
+        rooms @(:rooms player-data)]
+    (get rooms room)))
 
 (defn out-ch
   [p-id]

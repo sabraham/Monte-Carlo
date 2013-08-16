@@ -82,9 +82,11 @@
 (defn join-room
   [p {:keys [name]}]
   (if-let [q (get-in @mc.database/ROOM-DATABASE [name :q])]
-    (do
-      (go (>! q p))
-      (ok-msg (:id p)))
+    (if (not (mc.database/in-room? (:id p) name))
+      (do
+        (go (>! q p))
+        (ok-msg (:id p)))
+      (error-msg (:id p) -2 (str "Already in room \"" name "\".")))
     (error-msg (:id p) -2 (str "Room \"" name "\" does not exist yet."))))
 
 (defn hand-query
@@ -115,8 +117,8 @@
                            "new_room" (create-new-room p-id req)
                            "join_room" (join-room p req)
                            "play" (go (>! (mc.database/listen-ch p-id (:name req)) (:amt req)))
-                           "hand?" (hand-query p-id (:name req))
-                           "whoami?" (whoami-query p-id)
+                           "hand" (hand-query p-id (:name req))
+                           "whoami" (whoami-query p-id)
                            (error-msg p -1 "bad \"type\" argument")))
                        (catch com.fasterxml.jackson.core.JsonParseException e
                          (error-msg p -17 "You sent me bad json!"))))
